@@ -66,6 +66,27 @@ the last available values while valid core vehicle status continues to update.
 Reauthentication and reconfiguration keep the same account; add a separate
 integration entry to use a different account.
 
+### Charge port and command progress
+
+Use the **Charge Port** cover for Open/Close controls and Open, Closed, Opening
+and Closing states. Its door icon changes with the state. Opening/Closing means
+the request is awaiting fresh car status; it does not claim the motor has
+already moved. Locks similarly show Locking/Unlocking while confirmation is
+pending. Old cached values do not clear this progress, and pending requests
+expire rather than remaining stuck indefinitely.
+
+The **Charge Port (legacy)** switch keeps its existing ID for automations. On an
+existing dashboard, select the new Charge Port cover to get the open/close
+presentation. There is no need to remove the account or recreate automations.
+
+Climate requests use current heater/defrost settings and the target selected in
+the climate card. Home Assistant converts your chosen display units to the
+vehicle's Celsius command units. If the car has not reported a target, choose
+one and start from **Climate Control**; the integration does not invent a target.
+Changing temperature while climate is running validates the whole request before
+stopping and restarting it. Window Open, Close and Vent remain available; the
+misleading Stop action that previously sent Close is no longer offered.
+
 ## Test and roll back
 
 Start by checking vehicle status against Bluelink. Then try one command at a time

@@ -77,6 +77,7 @@ class _ConfirmedCommandRefreshError(HomeAssistantError):
     action_submitted = True
     request_rejected = False
 
+
 class _ClimateRestartNotSubmittedError(HomeAssistantError):
     """The stop stage may have run, but the requested target was never sent."""
 
