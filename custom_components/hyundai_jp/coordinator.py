@@ -39,10 +39,12 @@ from ._api.const import ORDER_STATUS, WINDOW_STATE
 from ._api.exceptions import (
     APIError,
     AuthenticationError,
+    BluelinkError,
     RateLimitingError,
     RequestTimeoutError,
     UnsupportedControlError,
 )
+from .command_state import PendingCommandTracker
 from .const import (
     CONF_ENABLE_GEOLOCATION_ENTITY,
     CONF_FORCE_REFRESH_INTERVAL,
@@ -72,9 +74,15 @@ _T = TypeVar("_T")
 class _ConfirmedCommandRefreshError(HomeAssistantError):
     """A successful service result could not be followed by updated telemetry."""
 
+    action_submitted = True
+    request_rejected = False
+
 
 class _UnconfirmedCommandError(HomeAssistantError):
     """A submitted command has a known, unsuccessful confirmation outcome."""
+
+    action_submitted = True
+    request_rejected = False
 
 
 class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -148,11 +156,31 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._svm = SVMImageCache()
         self._failed_vehicles: set[str] = set()
         self._vehicle_failures: dict[str, int] = {}
+        self._pending_commands = PendingCommandTracker(self._notify_pending_change)
         self._force_refresh_failures: dict[str, int] = {}
         self._force_refresh_retry_at: dict[str, float] = {}
         self._post_command_watch_tasks: dict[str, asyncio.Task[None]] = {}
         self._post_command_watch_deadlines: dict[str, float] = {}
         self._post_command_watch_diagnostics: dict[str, dict[str, Any]] = {}
+
+    @callback
+    def _notify_pending_change(self) -> None:
+        """Publish progress without treating a cached poll as successful."""
+        self.async_update_listeners()
+
+    @callback
+    def async_update_listeners(self) -> None:
+        self._pending_commands.observe(self.vehicle_manager.vehicles)
+        super().async_update_listeners()
+
+    def get_pending_target(self, vehicle_id: str, actuator: str) -> bool | None:
+        return self._pending_commands.target(vehicle_id, actuator)
+
+    def get_pending_status(self, vehicle_id: str, actuator: str) -> str | None:
+        return self._pending_commands.phase(vehicle_id, actuator)
+
+    def get_pending_command_diagnostics(self) -> list[dict[str, Any]]:
+        return self._pending_commands.diagnostics()
 
     async def _async_api_job(self, target: Callable[..., _T], *args: Any) -> _T:
         """Keep executor work owned until completion, even if its caller cancels."""
@@ -588,6 +616,7 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Share one shielded cleanup across explicit and HA unload callbacks."""
         self._closing = True
         self._shutdown_started = True
+        self._pending_commands.close()
         shutdown = self._shutdown_task
         if shutdown is None:
             shutdown = self._shutdown_task = asyncio.create_task(
@@ -840,10 +869,12 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 status if status is not None else ORDER_STATUS.UNKNOWN,
                 "the completion status is unknown",
             )
-            raise _UnconfirmedCommandError(
+            error = _UnconfirmedCommandError(
                 "The vehicle command was sent but successful completion was not confirmed: "
                 + reason
             )
+            error.request_rejected = status == ORDER_STATUS.FAILED
+            raise error
 
     async def _async_refresh_command_state(self, status: ORDER_STATUS | None) -> None:
         """Read cached state separately from service acceptance or execution."""
@@ -875,12 +906,16 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 False,
                 0,
             )
+            self._pending_commands.receipt(vehicle_id, action_id, status)
             self._check_command_confirmation(status)
         finally:
             try:
                 await self._async_refresh_command_state(status)
             finally:
-                if status == ORDER_STATUS.ACCEPTED:
+                if (
+                    status == ORDER_STATUS.ACCEPTED
+                    or self._pending_commands.has_pending(vehicle_id)
+                ):
                     self._start_post_command_state_watch(vehicle_id)
 
     async def async_await_action_and_force_refresh(
@@ -897,6 +932,8 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         *,
         force_refresh: bool = False,
         command: str | None = None,
+        pending_actuator: str | None = None,
+        pending_target: bool | None = None,
     ) -> None:
         """Send a vehicle action, wait for completion, and refresh data.
 
@@ -921,11 +958,30 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "Please wait for it to complete and try again."
             )
         async with self._action_lock:
-            await self._async_complete_operation(
-                self._async_send_action_locked(
-                    vehicle_id, action_fn, error_label, force_refresh
+            if pending_actuator is not None and pending_target is not None:
+                self._pending_commands.begin(
+                    self.vehicle_manager.get_vehicle(vehicle_id),
+                    pending_actuator,
+                    pending_target,
                 )
-            )
+            try:
+                await self._async_complete_operation(
+                    self._async_send_action_locked(
+                        vehicle_id,
+                        action_fn,
+                        error_label,
+                        force_refresh,
+                        pending_actuator,
+                    )
+                )
+            except Exception:
+                if (
+                    pending_actuator is not None
+                    and self._pending_commands.phase(vehicle_id, pending_actuator)
+                    == "submitting"
+                ):
+                    self._pending_commands.failed(vehicle_id, pending_actuator)
+                raise
 
     async def _async_send_action_locked(
         self,
@@ -933,22 +989,56 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         action_fn: Callable[[], Any],
         error_label: str,
         force_refresh: bool,
+        pending_actuator: str | None = None,
     ) -> None:
         """Hold the caller's operation lock through submission and confirmation."""
         await self.async_check_and_refresh_token()
         try:
             action_id = await self._async_run_executor_job(action_fn)
         except RequestTimeoutError as err:
+            if err.action_submitted is False:
+                if pending_actuator is not None:
+                    self._pending_commands.failed(vehicle_id, pending_actuator)
+                raise HomeAssistantError(
+                    "The command could not be submitted; authentication or "
+                    "connection setup timed out"
+                ) from err
+            if pending_actuator is not None:
+                self._pending_commands.unknown(vehicle_id, pending_actuator)
+                self._start_post_command_state_watch(vehicle_id)
             raise HomeAssistantError(
                 "The service response timed out; vehicle execution is unknown. "
                 "Check the vehicle state before retrying."
             ) from err
         except UnsupportedControlError as err:
+            if pending_actuator is not None:
+                self._pending_commands.failed(vehicle_id, pending_actuator)
             raise HomeAssistantError(
                 f"Vehicle does not support this action: {err}"
             ) from err
-        except Exception as err:
+        except AuthenticationError as err:
+            # The next explicit request may renew credentials, but this
+            # control submission is never automatically repeated.
+            self.vehicle_manager.invalidate_access_token()
+            if pending_actuator is not None:
+                self._pending_commands.failed(vehicle_id, pending_actuator)
             raise HomeAssistantError(f"Failed to {error_label}: {err}") from err
+        except (RateLimitingError, ValueError) as err:
+            if pending_actuator is not None:
+                self._pending_commands.failed(vehicle_id, pending_actuator)
+            raise HomeAssistantError(f"Failed to {error_label}: {err}") from err
+        except Exception as err:
+            if pending_actuator is not None:
+                if isinstance(err, BluelinkError) and (
+                    err.request_rejected or err.action_submitted is False
+                ):
+                    self._pending_commands.failed(vehicle_id, pending_actuator)
+                else:
+                    self._pending_commands.unknown(vehicle_id, pending_actuator)
+                    self._start_post_command_state_watch(vehicle_id)
+            raise HomeAssistantError(f"Failed to {error_label}: {err}") from err
+        if pending_actuator is not None:
+            self._pending_commands.submitted(vehicle_id, pending_actuator, action_id)
         try:
             if force_refresh:
                 await self.async_await_action_and_force_refresh(vehicle_id, action_id)
@@ -967,6 +1057,8 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             lambda: self.vehicle_manager.lock(vehicle_id),
             "lock vehicle",
             command="lock_action",
+            pending_actuator="door_lock",
+            pending_target=True,
         )
 
     async def async_unlock_vehicle(self, vehicle_id: str) -> None:
@@ -975,6 +1067,8 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             lambda: self.vehicle_manager.unlock(vehicle_id),
             "unlock vehicle",
             command="lock_action",
+            pending_actuator="door_lock",
+            pending_target=False,
         )
 
     async def async_open_charge_port(self, vehicle_id: str) -> None:
@@ -983,6 +1077,8 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             lambda: self.vehicle_manager.open_charge_port(vehicle_id),
             "open charge port",
             command="charge_port_action",
+            pending_actuator="charge_port",
+            pending_target=True,
         )
 
     async def async_close_charge_port(self, vehicle_id: str) -> None:
@@ -991,6 +1087,8 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             lambda: self.vehicle_manager.close_charge_port(vehicle_id),
             "close charge port",
             command="charge_port_action",
+            pending_actuator="charge_port",
+            pending_target=False,
         )
 
     async def async_start_climate(

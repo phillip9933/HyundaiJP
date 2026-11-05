@@ -143,4 +143,7 @@ async def async_get_config_entry_diagnostics(
     state_summary = coordinator.get_post_command_state_diagnostics()
     if isinstance(state_summary, list):
         payload["post_command_state"] = state_summary
+    pending_summary = coordinator.get_pending_command_diagnostics()
+    if isinstance(pending_summary, list):
+        payload["pending_commands"] = pending_summary
     return payload

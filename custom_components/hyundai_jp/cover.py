@@ -7,6 +7,7 @@ from typing import Any, Final
 
 from homeassistant.components.cover import (
     ATTR_POSITION,
+    CoverDeviceClass,
     CoverEntity,
     CoverEntityDescription,
     CoverEntityFeature,
@@ -64,15 +65,20 @@ async def async_setup_entry(
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up window cover entities from a config entry."""
+    """Set up window and charge-port covers independently."""
     coordinator = hass.data[DOMAIN][config_entry.unique_id]
-    if not (coordinator.supports_command("set_windows_state")):
-        async_add_entities([])
-        return
-    entities = []
+    entities: list[CoverEntity] = []
     for vehicle_id in coordinator.vehicle_manager.vehicles:
         vehicle: Vehicle = coordinator.vehicle_manager.vehicles[vehicle_id]
-        if not vehicle.supports.window_control:
+        if (
+            coordinator.supports_command("charge_port_action")
+            and vehicle.ev_charge_port_door_is_open is not None
+        ):
+            entities.append(HyundaiBluelinkChargePortCover(coordinator, vehicle))
+        if (
+            not coordinator.supports_command("set_windows_state")
+            or not vehicle.supports.window_control
+        ):
             continue
         positions = vehicle.supports.supported_window_positions
         for description in COVER_DESCRIPTIONS:
@@ -157,3 +163,70 @@ class HyundaiBluelinkCover(CoverEntity, HyundaiBluelinkEntity):
             state = WINDOW_STATE.OPEN
         options = self._window_options(state)
         await self.coordinator.async_set_windows(self.vehicle.id, options)
+
+
+class HyundaiBluelinkChargePortCover(CoverEntity, HyundaiBluelinkEntity):
+    """A charging flap with real open/closed and pending movement states."""
+
+    _attr_supported_features = CoverEntityFeature.OPEN | CoverEntityFeature.CLOSE
+    _attr_device_class = CoverDeviceClass.DOOR
+    _attr_translation_key = "charge_port"
+
+    def __init__(
+        self, coordinator: JapanDataUpdateCoordinator, vehicle: Vehicle
+    ) -> None:
+        HyundaiBluelinkEntity.__init__(self, coordinator, vehicle)
+        self._attr_unique_id = f"{DOMAIN}_{vehicle.id}_charge_port"
+
+    @property
+    def is_closed(self) -> bool | None:
+        value = self.vehicle.ev_charge_port_door_is_open
+        return not value if value is not None else None
+
+    @property
+    def is_opening(self) -> bool:
+        return (
+            self.coordinator.get_pending_target(self.vehicle.id, "charge_port") is True
+        )
+
+    @property
+    def is_closing(self) -> bool:
+        return (
+            self.coordinator.get_pending_target(self.vehicle.id, "charge_port") is False
+        )
+
+    @property
+    def icon(self) -> str:
+        if self.vehicle.ev_charge_port_door_is_open is None:
+            return "mdi:door"
+        return (
+            "mdi:door-open"
+            if self.vehicle.ev_charge_port_door_is_open
+            else "mdi:door-closed"
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        target = self.coordinator.get_pending_target(self.vehicle.id, "charge_port")
+        value = self.vehicle.ev_charge_port_door_is_open
+        return {
+            "command_pending": target is not None,
+            "command_status": self.coordinator.get_pending_status(
+                self.vehicle.id, "charge_port"
+            ),
+            "requested_state": ("open" if target else "closed")
+            if target is not None
+            else None,
+            "last_confirmed_state": ("open" if value else "closed")
+            if value is not None
+            else None,
+        }
+
+    async def async_open_cover(self, **kwargs: Any) -> None:
+        await self.coordinator.async_open_charge_port(self.vehicle.id)
+
+    async def async_close_cover(self, **kwargs: Any) -> None:
+        await self.coordinator.async_close_charge_port(self.vehicle.id)
+
+    async def async_stop_cover(self, **kwargs: Any) -> None:
+        raise HomeAssistantError("Remote charge-port stopping is not supported")

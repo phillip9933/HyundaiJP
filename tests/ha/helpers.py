@@ -19,6 +19,7 @@ def make_runtime_coordinator() -> JapanDataUpdateCoordinator:
     """Initialize real per-account runtime state without starting HA polling."""
     result = JapanDataUpdateCoordinator.__new__(JapanDataUpdateCoordinator)
     result._initialize_runtime_state()
+    result._listeners = {}
     return result
 
 
@@ -34,6 +35,8 @@ def make_coordinator(*vehicles: Vehicle) -> MagicMock:
     coordinator = MagicMock()
     coordinator.vehicle_manager.vehicles = {v.id: v for v in vehicles}
     coordinator.async_supports_svm = AsyncMock(return_value=False)
+    coordinator.get_pending_target.return_value = None
+    coordinator.get_pending_status.return_value = None
     return coordinator
 
 

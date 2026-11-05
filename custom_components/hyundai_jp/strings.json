@@ -851,6 +851,9 @@
       },
       "back_right_window": {
         "name": "Back Right Window"
+      },
+      "charge_port": {
+        "name": "Charge Port"
       }
     },
     "switch": {
@@ -892,6 +895,9 @@
       },
       "svm_dewarp": {
         "name": "SVM Dewarp"
+      },
+      "ev_charge_port_door_legacy": {
+        "name": "Charge Port (legacy)"
       }
     },
     "climate": {

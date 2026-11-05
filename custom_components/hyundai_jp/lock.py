@@ -52,12 +52,40 @@ class HyundaiBluelinkLock(LockEntity, HyundaiBluelinkEntity):
     @property
     def icon(self) -> str | None:
         """Return the icon for the current lock state."""
+        if self.is_locked is None:
+            return "mdi:lock-outline"
         return "mdi:lock" if self.is_locked else "mdi:lock-open-variant"
 
     @property
     def is_locked(self) -> bool | None:
         """Return True if the doors are locked."""
         return self.vehicle.is_locked
+
+    @property
+    def is_locking(self) -> bool:
+        return self.coordinator.get_pending_target(self.vehicle.id, "door_lock") is True
+
+    @property
+    def is_unlocking(self) -> bool:
+        return (
+            self.coordinator.get_pending_target(self.vehicle.id, "door_lock") is False
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        target = self.coordinator.get_pending_target(self.vehicle.id, "door_lock")
+        return {
+            "command_pending": target is not None,
+            "command_status": self.coordinator.get_pending_status(
+                self.vehicle.id, "door_lock"
+            ),
+            "requested_state": ("locked" if target else "unlocked")
+            if target is not None
+            else None,
+            "last_confirmed_state": ("locked" if self.vehicle.is_locked else "unlocked")
+            if self.vehicle.is_locked is not None
+            else None,
+        }
 
     async def async_lock(self, **kwargs: Any) -> None:
         """Lock the doors."""

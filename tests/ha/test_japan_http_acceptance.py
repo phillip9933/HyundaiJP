@@ -126,7 +126,7 @@ async def test_http_timeout_is_unknown_and_does_not_resend():
     assert api.session.request.call_count == 1
     assert not getattr(api, "_japan_actions", {})
     helper.status.assert_not_called()
-    result._start_post_command_state_watch.assert_not_called()
+    result._start_post_command_state_watch.assert_called_once_with(vehicle.id)
     assert not result._action_lock.locked()
 
 
@@ -140,4 +140,43 @@ async def test_vendor_error_is_not_accepted_or_retried():
     assert not getattr(api, "_japan_actions", {})
     helper.status.assert_not_called()
     result._start_post_command_state_watch.assert_not_called()
+
+
+@pytest.mark.parametrize("code", ["4002", "4004", "5031", "9998"])
+async def test_explicit_service_rejection_clears_pending_without_replay(code):
+    result, api, _manager, _helper, vehicle = pipeline(
+        {"retCode": "F", "resCode": code}
+    )
+    with pytest.raises(HomeAssistantError):
+        await result.async_unlock_vehicle(vehicle.id)
+    assert result.get_pending_target(vehicle.id, "door_lock") is None
+    assert result.get_pending_status(vehicle.id, "door_lock") == "rejected"
+    assert api.session.request.call_count == 1
+    result._start_post_command_state_watch.assert_not_called()
+
+
+async def test_pin_timeout_before_action_does_not_leave_unlock_pending():
+    from custom_components.hyundai_jp._api.exceptions import RequestTimeoutError
+
+    result, api, _manager, _helper, vehicle = pipeline()
+    api._get_control_headers = Mock(
+        side_effect=RequestTimeoutError("synthetic PIN timeout")
+    )
+    with pytest.raises(HomeAssistantError, match="could not be submitted"):
+        await result.async_unlock_vehicle(vehicle.id)
+    assert result.get_pending_target(vehicle.id, "door_lock") is None
+    api.session.request.assert_not_called()
+    api._mqtt_for_vehicle.assert_not_called()
+    result._start_post_command_state_watch.assert_not_called()
+
+
+async def test_http_408_keeps_bounded_unknown_progress():
+    result, api, _manager, _helper, vehicle = pipeline({})
+    api.session.request.return_value.status_code = 408
+    with pytest.raises(HomeAssistantError):
+        await result.async_unlock_vehicle(vehicle.id)
+    assert result.get_pending_target(vehicle.id, "door_lock") is False
+    assert result.get_pending_status(vehicle.id, "door_lock") == "submission_unknown"
+    assert api.session.request.call_count == 1
+    result._start_post_command_state_watch.assert_called_once_with(vehicle.id)
     assert not result._action_lock.locked()
