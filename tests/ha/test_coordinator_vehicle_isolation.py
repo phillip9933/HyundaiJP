@@ -68,7 +68,7 @@ def _make_coordinator(
     """Build a coordinator with the attributes the polling code touches."""
     coordinator = make_runtime_coordinator()
     coordinator.hass = _FakeHass()  # type: ignore[assignment]
-    coordinator.config_entry = SimpleNamespace(entry_id="synthetic-entry")  # type: ignore[assignment]
+    coordinator.config_entry = SimpleNamespace(entry_id="synthetic-entry", data={})  # type: ignore[assignment]
     coordinator.force_refresh_interval = 1440
     coordinator._failed_vehicles = set()
     coordinator._vehicle_failures = {}
@@ -103,6 +103,9 @@ def _make_coordinator(
         def check_and_refresh_token(self) -> bool:
             self.token_check = True
             return False
+
+        def invalidate_access_token(self) -> None:
+            self.token_invalidated = True
 
         token = MagicMock()
 
@@ -308,7 +311,7 @@ async def test_failed_force_refresh_is_logged_when_cached_fallback_works(
         await coordinator._async_poll_vehicles(mode="check")
 
     assert any(
-        "Sold Car" in record.message and "boom" in record.message
+        "ServiceTemporaryUnavailable" in record.message and "delaying" in record.message
         for record in caplog.records
     )
     # the cached fallback answered, so the vehicle still has data

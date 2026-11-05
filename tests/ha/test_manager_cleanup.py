@@ -184,7 +184,7 @@ async def test_shutdown_drains_active_poll_and_blocks_fallback(mode, stop_pollin
     assert not close.called
     release.set()
     if mode == "force":
-        with pytest.raises(HomeAssistantError, match="shutting down"):
+        with pytest.raises(RuntimeError, match="synthetic request failure"):
             await polling
         cached.assert_not_called()
     else:

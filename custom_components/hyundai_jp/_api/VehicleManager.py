@@ -78,6 +78,11 @@ class VehicleManager:
             raise AuthenticationError("Sign in to Hyundai Bluelink JP first")
         return self.token
 
+    def invalidate_access_token(self) -> None:
+        """Expire a rejected access token without discarding refresh identity."""
+        if self.token is not None:
+            self.token.valid_until = dt.datetime.min.replace(tzinfo=dt.UTC)
+
     def initialize_vehicles(self) -> None:
         if len(self.vehicles) > 0:
             _LOGGER.warning(
@@ -111,7 +116,11 @@ class VehicleManager:
         vehicle = self.get_vehicle(vehicle_id)
         if vehicle.enabled:
             vehicle.last_scanned_at = dt.datetime.now(dt.UTC)
-            self.api.update_vehicle_with_cached_state(self.get_token(), vehicle)
+            try:
+                self.api.update_vehicle_with_cached_state(self.get_token(), vehicle)
+            except AuthenticationError:
+                self.invalidate_access_token()
+                raise
             if self.geocode_api_enable is True:
                 self.api.update_geocoded_location(
                     token=self.get_token(),
@@ -145,7 +154,12 @@ class VehicleManager:
         vehicle = self.get_vehicle(vehicle_id)
         if vehicle.enabled:
             vehicle.last_scanned_at = dt.datetime.now(dt.UTC)
-            self.api.force_refresh_vehicle_state(self.get_token(), vehicle)
+            try:
+                self.api.force_refresh_vehicle_state(self.get_token(), vehicle)
+            except AuthenticationError:
+                # A rejected command must not be replayed automatically.
+                self.invalidate_access_token()
+                raise
         else:
             _LOGGER.debug(f"{DOMAIN} - Vehicle Disabled, skipping.")
 

@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 import datetime as dt
 from datetime import timedelta
 import logging
+import time
 from typing import Any, Literal, TypeVar
 
 from homeassistant.config_entries import ConfigEntry
@@ -147,6 +148,8 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._svm = SVMImageCache()
         self._failed_vehicles: set[str] = set()
         self._vehicle_failures: dict[str, int] = {}
+        self._force_refresh_failures: dict[str, int] = {}
+        self._force_refresh_retry_at: dict[str, float] = {}
         self._post_command_watch_tasks: dict[str, asyncio.Task[None]] = {}
         self._post_command_watch_deadlines: dict[str, float] = {}
         self._post_command_watch_diagnostics: dict[str, dict[str, Any]] = {}
@@ -187,6 +190,11 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self.async_check_and_refresh_token()
         except AuthenticationError as AuthError:
             raise ConfigEntryAuthFailed(AuthError) from AuthError
+        except RateLimitingError as err:
+            raise UpdateFailed(
+                "Bluelink request limit reached; delaying the next poll",
+                retry_after=2 * 60 * 60,
+            ) from err
         except Exception as err:
             # Transient API errors must be surfaced as UpdateFailed rather than
             # propagating as unexpected exceptions.  HA's update coordinator
@@ -229,8 +237,11 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_force_update_all_unlocked(self) -> None:
         """Force refresh vehicle data and update it."""
         await self.async_check_and_refresh_token()
-        await self._async_poll_vehicles(mode="force")
-        self.async_set_updated_data(self.data)
+        try:
+            await self._async_poll_vehicles(mode="force")
+        finally:
+            # Publish successful vehicles even when another refresh failed.
+            self.async_set_updated_data(self.data)
 
     async def _async_poll_vehicles(self, *, mode: PollMode) -> None:
         """Poll each vehicle on its own so one failing vehicle can't fail all.
@@ -239,21 +250,33 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         account-scoped and raise UpdateFailed so Home Assistant backs off.
         """
         failed: set[str] = set()
-        auth_failures = 0
+        auth_recovered = False
         for vehicle_id in list(self.vehicle_manager.vehicles):
             try:
-                await self._async_poll_vehicle(vehicle_id, mode=mode)
+                try:
+                    await self._async_poll_vehicle(vehicle_id, mode=mode)
+                except AuthenticationError:
+                    await self._async_api_job(
+                        self.vehicle_manager.invalidate_access_token
+                    )
+                    if mode == "force" or auth_recovered:
+                        # Never replay a forced refresh, and refresh at most
+                        # once per account poll even if several cars reject it.
+                        raise
+                    auth_recovered = True
+                    try:
+                        await self.async_check_and_refresh_token()
+                    except AuthenticationError as err:
+                        raise ConfigEntryAuthFailed(
+                            "Bluelink authentication could not be renewed"
+                        ) from err
+                    # Recovery only repeats a cached read, never a car wake-up.
+                    await self._async_poll_vehicle(vehicle_id, mode="cached")
             except AuthenticationError as err:
-                # The token is only repaired (refresh or re-login) by the next
-                # cycle's token check, which raises ConfigEntryAuthFailed itself
-                # if the credentials are bad.
-                auth_failures += 1
                 failed.add(vehicle_id)
                 self._log_vehicle_failure(vehicle_id, err)
-                if auth_failures == len(self.vehicle_manager.vehicles):
-                    raise UpdateFailed(
-                        f"Authentication failed for every vehicle: {err}"
-                    ) from err
+            except ConfigEntryAuthFailed:
+                raise
             except RateLimitingError as err:
                 raise UpdateFailed(
                     f"Rate limited by the API: {err}", retry_after=2 * 60 * 60
@@ -268,9 +291,31 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             else:
                 self._vehicle_failures.pop(vehicle_id, None)
         self._failed_vehicles = failed
+        active = self.vehicle_manager.vehicles.keys()
+        for state in (self._force_refresh_failures, self._force_refresh_retry_at):
+            for vehicle_id in list(state):
+                if vehicle_id not in active:
+                    del state[vehicle_id]
+        if failed and mode == "force":
+            raise HomeAssistantError(
+                "Fresh vehicle status could not be retrieved for "
+                f"{len(failed)} vehicle(s); cached status is not refresh confirmation"
+            )
+        if (
+            failed
+            and len(failed) == len(self.vehicle_manager.vehicles)
+            and auth_recovered
+        ):
+            raise UpdateFailed(
+                "Vehicle status was rejected after renewing authentication"
+            )
 
     async def _async_poll_vehicle(self, vehicle_id: str, *, mode: PollMode) -> None:
         """Update one vehicle, falling back to the cached state if a force fails."""
+        if mode == "check" and time.monotonic() < self._force_refresh_retry_at.get(
+            vehicle_id, 0
+        ):
+            mode = "cached"
         try:
             if mode == "check":
                 await self._async_api_job(
@@ -286,19 +331,29 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 await self._async_api_job(
                     self.vehicle_manager.update_vehicle_with_cached_state, vehicle_id
                 )
+        except AuthenticationError, RateLimitingError:
+            raise
         except Exception as err:
-            if mode == "cached":
+            if mode in ("cached", "force"):
                 raise
+            failures = self._force_refresh_failures.get(vehicle_id, 0) + 1
+            self._force_refresh_failures[vehicle_id] = failures
+            delay = min(15 * 60 * 2 ** min(failures - 1, 3), 2 * 60 * 60)
+            self._force_refresh_retry_at[vehicle_id] = time.monotonic() + delay
             _LOGGER.warning(
-                "%s - Force refresh failed for %s (%s), using cached state: %s",
+                "%s - Periodic force refresh failed (%s); using cached status "
+                "and delaying the next wake-up by %ss",
                 DOMAIN,
-                self.vehicle_manager.vehicles[vehicle_id].name,
-                vehicle_id,
-                err,
+                type(err).__name__,
+                delay,
             )
             await self._async_api_job(
                 self.vehicle_manager.update_vehicle_with_cached_state, vehicle_id
             )
+        else:
+            if mode != "cached":
+                self._force_refresh_failures.pop(vehicle_id, None)
+                self._force_refresh_retry_at.pop(vehicle_id, None)
 
     def _log_vehicle_failure(self, vehicle_id: str, err: Exception) -> None:
         vehicle = self.vehicle_manager.vehicles[vehicle_id]
