@@ -11,7 +11,6 @@ from unittest.mock import AsyncMock, MagicMock, Mock
 
 from custom_components.hyundai_jp._api import Vehicle
 from custom_components.hyundai_jp._api.VehicleManager import VehicleManager
-from custom_components.hyundai_jp.const import DOMAIN
 from custom_components.hyundai_jp.coordinator import JapanDataUpdateCoordinator
 
 
@@ -43,8 +42,8 @@ def make_coordinator(*vehicles: Vehicle) -> MagicMock:
 def make_hass(coordinator: MagicMock) -> tuple[MagicMock, MagicMock]:
     """A ``(hass, config_entry)`` pair wired to ``coordinator``."""
     hass = MagicMock()
-    hass.data = {DOMAIN: {UNIQUE_ID: coordinator}}
-    config_entry = MagicMock(unique_id=UNIQUE_ID)
+    hass.data = {}
+    config_entry = MagicMock(unique_id=UNIQUE_ID, runtime_data=coordinator)
     return hass, config_entry
 
 
@@ -65,7 +64,7 @@ def make_operation_coordinator() -> JapanDataUpdateCoordinator:
     result.vehicle_manager.get_vehicle.side_effect = lambda vehicle_id: (
         result.vehicle_manager.vehicles[vehicle_id]
     )
-    result.data = {}
+    result.data = None
     result.hass = MagicMock()
     result.hass.async_add_executor_job = AsyncMock()
     result.async_check_and_refresh_token = AsyncMock()
@@ -97,9 +96,9 @@ def make_cleanup_coordinator(manager: Any) -> JapanDataUpdateCoordinator:
 def make_unload_context(coordinator, *, platform_success=True):
     """Wire one account to successful or failed HA platform unloading."""
     hass = SimpleNamespace(
-        data={DOMAIN: {"synthetic-entry": coordinator}},
+        data={},
         config_entries=SimpleNamespace(
             async_unload_platforms=AsyncMock(return_value=platform_success)
         ),
     )
-    return hass, SimpleNamespace(unique_id="synthetic-entry")
+    return hass, SimpleNamespace(unique_id="synthetic-entry", runtime_data=coordinator)

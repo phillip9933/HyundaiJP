@@ -14,7 +14,6 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     PERCENTAGE,
     EntityCategory,
@@ -30,7 +29,7 @@ from homeassistant.helpers.typing import StateType
 from ._api import Vehicle
 from ._api.const import ENGINE_TYPES
 from .const import CHARGING_CURRENTS, DOMAIN, DYNAMIC_UNIT
-from .coordinator import JapanDataUpdateCoordinator
+from .coordinator import HyundaiJPConfigEntry, JapanDataUpdateCoordinator
 from .entity import HyundaiBluelinkEntity
 
 
@@ -651,11 +650,11 @@ SENSOR_DESCRIPTIONS: Final[tuple[HyundaiBluelinkSensorEntityDescription, ...]] =
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    config_entry: ConfigEntry,
+    config_entry: HyundaiJPConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up sensor platform."""
-    coordinator = hass.data[DOMAIN][config_entry.unique_id]
+    coordinator = config_entry.runtime_data
     entities: list[SensorEntity] = []
     for vehicle_id in coordinator.vehicle_manager.vehicles:
         vehicle: Vehicle = coordinator.vehicle_manager.vehicles[vehicle_id]

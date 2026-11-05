@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import ATTR_DEVICE_ID
 from homeassistant.core import ServiceCall
 from homeassistant.exceptions import HomeAssistantError
@@ -25,11 +26,15 @@ def _services(monkeypatch, accounts, devices=None):
     entries, coordinators = {}, {}
     for entry_id, vehicle_ids in accounts.items():
         entry = SimpleNamespace(
-            entry_id=entry_id, unique_id=f"uid-{entry_id}", domain=DOMAIN
+            entry_id=entry_id,
+            unique_id=f"uid-{entry_id}",
+            domain=DOMAIN,
+            state=ConfigEntryState.LOADED,
         )
         entries[entry_id] = entry
         coordinator = MagicMock(spec=JapanDataUpdateCoordinator)
         coordinator.config_entry = entry
+        entry.runtime_data = coordinator
         coordinator.vehicle_manager = SimpleNamespace(
             vehicles={identifier: object() for identifier in vehicle_ids}
         )
@@ -43,6 +48,9 @@ def _services(monkeypatch, accounts, devices=None):
         }
     }
     hass.config_entries.async_get_entry.side_effect = entries.get
+    hass.config_entries.async_entries.side_effect = lambda domain: [
+        entry for entry in entries.values() if entry.domain == domain
+    ]
     devices = {} if devices is None else devices
     registry = MagicMock()
     registry.async_get.side_effect = devices.get
@@ -109,6 +117,8 @@ async def test_invalid_explicit_values_never_use_single_car_fallback(
         "unrelated",
         "missing-entry",
         "unloaded",
+        "setup-in-progress",
+        "missing-runtime",
         "stale-id",
         "vin-only",
         "no-unique-id",
@@ -128,7 +138,11 @@ async def test_explicit_device_must_belong_to_a_loaded_account_and_current_vehic
     elif invalid == "missing-entry":
         environment.entries.clear()
     elif invalid == "unloaded":
-        environment.hass.data[DOMAIN].clear()
+        environment.entries["account-a"].state = ConfigEntryState.NOT_LOADED
+    elif invalid == "setup-in-progress":
+        environment.entries["account-a"].state = ConfigEntryState.SETUP_IN_PROGRESS
+    elif invalid == "missing-runtime":
+        del environment.entries["account-a"].runtime_data
     elif invalid == "stale-id":
         device.identifiers = {(DOMAIN, "old-vehicle-id"), (DOMAIN, "vin:SYNTHETIC")}
     elif invalid == "vin-only":

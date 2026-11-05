@@ -57,7 +57,7 @@ async def test_forced_refresh_wait_also_checks_confirmation(monkeypatch):
     result = make_operation_coordinator()
     result.hass.async_add_executor_job.side_effect = [ORDER_STATUS.FAILED, None]
     with pytest.raises(HomeAssistantError, match="not confirmed"):
-        await result.async_await_action_and_force_refresh("CAR", "SYNTHETIC_ID")
+        await result.async_await_action_and_refresh("CAR", "SYNTHETIC_ID")
     result.async_set_updated_data.assert_called_once()
 
 
@@ -97,8 +97,6 @@ async def test_http_acceptance_completes_without_waiting_for_mqtt(monkeypatch):
         result.vehicle_manager.check_action_status,
         "CAR",
         "SYNTHETIC_ID",
-        False,
-        0,
     )
     result.vehicle_manager.force_refresh_vehicle_state.assert_not_called()
     result.async_set_updated_data.assert_called_once()

@@ -6,23 +6,22 @@ from __future__ import annotations
 # the ignore covers HA's implicit re-export, rejected by mypy --strict.
 from homeassistant.components.device_tracker import TrackerEntity  # type: ignore[attr-defined]
 from homeassistant.components.device_tracker.const import SourceType
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from ._api import Vehicle
 from .const import DOMAIN
-from .coordinator import JapanDataUpdateCoordinator
+from .coordinator import HyundaiJPConfigEntry, JapanDataUpdateCoordinator
 from .entity import HyundaiBluelinkEntity
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    config_entry: ConfigEntry,
+    config_entry: HyundaiJPConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the device tracker from a config entry."""
-    coordinator = hass.data[DOMAIN][config_entry.unique_id]
+    coordinator = config_entry.runtime_data
     entities = []
     for vehicle_id in coordinator.vehicle_manager.vehicles:
         vehicle: Vehicle = coordinator.vehicle_manager.vehicles[vehicle_id]

@@ -13,7 +13,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from homeassistant.components.image import ImageEntity
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -21,7 +20,11 @@ from homeassistant.util import dt as dt_util
 
 from ._api import Vehicle
 from .const import DOMAIN
-from .coordinator import SIGNAL_SVM_RENDER, JapanDataUpdateCoordinator
+from .coordinator import (
+    SIGNAL_SVM_RENDER,
+    HyundaiJPConfigEntry,
+    JapanDataUpdateCoordinator,
+)
 from .entity import HyundaiBluelinkEntity
 
 PARALLEL_UPDATES = 0
@@ -49,11 +52,11 @@ SVM_VIEWS: tuple[SVMView, ...] = (
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    config_entry: ConfigEntry,
+    config_entry: HyundaiJPConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up image platform."""
-    coordinator: JapanDataUpdateCoordinator = hass.data[DOMAIN][config_entry.unique_id]
+    coordinator: JapanDataUpdateCoordinator = config_entry.runtime_data
 
     entities = []
     for vehicle_id in coordinator.vehicle_manager.vehicles:

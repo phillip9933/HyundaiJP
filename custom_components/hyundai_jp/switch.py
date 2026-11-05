@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from homeassistant.components.switch import SwitchEntity, SwitchEntityDescription
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_ON, EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -15,7 +14,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 
 from ._api import Vehicle
 from .const import DOMAIN
-from .coordinator import JapanDataUpdateCoordinator
+from .coordinator import HyundaiJPConfigEntry, JapanDataUpdateCoordinator
 from .entity import HyundaiBluelinkEntity
 
 
@@ -26,14 +25,12 @@ class HyundaiBluelinkSwitchDescription(SwitchEntityDescription):
     value_fn: Callable[[Vehicle], bool | None]
     exists_fn: Callable[[Vehicle], bool]
     on_fn: Callable[[JapanDataUpdateCoordinator, str], Awaitable[None]]
-    commands: tuple[str, ...] = ("schedule_charging_and_climate",)
     off_fn: Callable[[JapanDataUpdateCoordinator, str], Awaitable[None]]
 
 
 SWITCH_DESCRIPTIONS: Final[tuple[HyundaiBluelinkSwitchDescription, ...]] = (
     HyundaiBluelinkSwitchDescription(
         key="ev_battery_is_charging",
-        commands=("start_charge", "stop_charge"),
         translation_key="ev_charging",
         icon="mdi:ev-station",
         value_fn=lambda vehicle: vehicle.ev_battery_is_charging,
@@ -43,7 +40,6 @@ SWITCH_DESCRIPTIONS: Final[tuple[HyundaiBluelinkSwitchDescription, ...]] = (
     ),
     HyundaiBluelinkSwitchDescription(
         key="air_control_is_on",
-        commands=("start_climate", "stop_climate"),
         translation_key="climate",
         icon="mdi:air-conditioner",
         value_fn=lambda vehicle: vehicle.air_control_is_on,
@@ -167,7 +163,6 @@ SWITCH_DESCRIPTIONS: Final[tuple[HyundaiBluelinkSwitchDescription, ...]] = (
     ),
     HyundaiBluelinkSwitchDescription(
         key="ev_charge_port_door_is_open",
-        commands=("charge_port_action",),
         translation_key="ev_charge_port_door_legacy",
         icon="mdi:power-plug-outline",
         value_fn=lambda vehicle: vehicle.ev_charge_port_door_is_open,
@@ -177,7 +172,6 @@ SWITCH_DESCRIPTIONS: Final[tuple[HyundaiBluelinkSwitchDescription, ...]] = (
     ),
     HyundaiBluelinkSwitchDescription(
         key="valet_mode_control",
-        commands=("valet_mode_action",),
         translation_key="valet_mode_control",
         icon="mdi:key-variant",
         value_fn=lambda vehicle: vehicle.valet_mode_active,
@@ -192,20 +186,15 @@ SWITCH_DESCRIPTIONS: Final[tuple[HyundaiBluelinkSwitchDescription, ...]] = (
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    config_entry: ConfigEntry,
+    config_entry: HyundaiJPConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up switch entities from a config entry."""
-    coordinator = hass.data[DOMAIN][config_entry.unique_id]
+    coordinator = config_entry.runtime_data
     entities: list[SwitchEntity] = []
     for vehicle_id in coordinator.vehicle_manager.vehicles:
         vehicle: Vehicle = coordinator.vehicle_manager.vehicles[vehicle_id]
         for description in SWITCH_DESCRIPTIONS:
-            if not all(
-                coordinator.supports_command(command)
-                for command in description.commands
-            ):
-                continue
             if description.exists_fn(vehicle):
                 entities.append(
                     HyundaiBluelinkSwitch(coordinator, description, vehicle)

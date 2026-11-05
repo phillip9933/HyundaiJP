@@ -5,6 +5,7 @@ import datetime as dt
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 import pytest
@@ -97,7 +98,12 @@ async def environment(monkeypatch, tmp_path):
         return target(*args)
 
     monkeypatch.setattr(hass, "async_add_executor_job", AsyncMock(side_effect=executor))
-    hass.data[DOMAIN] = {"account": owner}
+    owner.config_entry.runtime_data = owner
+    owner.config_entry.state = ConfigEntryState.LOADED
+    owner.config_entry.domain = DOMAIN
+    hass.config_entries = SimpleNamespace(
+        async_entries=lambda domain: [owner.config_entry]
+    )
     services.async_setup_services(hass)
     yield SimpleNamespace(
         hass=hass,

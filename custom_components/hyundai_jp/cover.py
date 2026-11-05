@@ -12,7 +12,6 @@ from homeassistant.components.cover import (
     CoverEntityDescription,
     CoverEntityFeature,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
@@ -21,7 +20,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from ._api import Vehicle, WindowRequestOptions
 from ._api.const import WINDOW_STATE
 from .const import DOMAIN
-from .coordinator import JapanDataUpdateCoordinator
+from .coordinator import HyundaiJPConfigEntry, JapanDataUpdateCoordinator
 from .entity import HyundaiBluelinkEntity
 
 
@@ -62,23 +61,17 @@ COVER_DESCRIPTIONS: Final[tuple[HyundaiBluelinkCoverDescription, ...]] = (
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    config_entry: ConfigEntry,
+    config_entry: HyundaiJPConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up window and charge-port covers independently."""
-    coordinator = hass.data[DOMAIN][config_entry.unique_id]
+    coordinator = config_entry.runtime_data
     entities: list[CoverEntity] = []
     for vehicle_id in coordinator.vehicle_manager.vehicles:
         vehicle: Vehicle = coordinator.vehicle_manager.vehicles[vehicle_id]
-        if (
-            coordinator.supports_command("charge_port_action")
-            and vehicle.ev_charge_port_door_is_open is not None
-        ):
+        if vehicle.ev_charge_port_door_is_open is not None:
             entities.append(HyundaiBluelinkChargePortCover(coordinator, vehicle))
-        if (
-            not coordinator.supports_command("set_windows_state")
-            or not vehicle.supports.window_control
-        ):
+        if not vehicle.supports.window_control:
             continue
         positions = vehicle.supports.supported_window_positions
         for description in COVER_DESCRIPTIONS:

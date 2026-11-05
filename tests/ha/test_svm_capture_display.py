@@ -70,7 +70,9 @@ async def test_image_setup_does_not_attempt_a_futile_startup_fetch(monkeypatch):
     added = MagicMock()
 
     await image_module.async_setup_entry(
-        hass, SimpleNamespace(unique_id="synthetic-entry"), added
+        hass,
+        SimpleNamespace(unique_id="synthetic-entry", runtime_data=coordinator),
+        added,
     )
 
     coordinator.async_get_svm_details.assert_not_awaited()

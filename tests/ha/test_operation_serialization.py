@@ -14,7 +14,7 @@ async def test_periodic_poll_skips_busy_japan_without_token_or_network_calls():
     result = make_operation_coordinator()
     result._async_update_data_unlocked = AsyncMock()
     async with result._action_lock:
-        assert await result._async_update_data() == {}
+        assert await result._async_update_data() is None
     result._async_update_data_unlocked.assert_not_awaited()
     result.async_check_and_refresh_token.assert_not_awaited()
 
@@ -24,7 +24,6 @@ async def test_periodic_poll_holds_lock_during_token_and_status_work():
 
     async def work():
         assert result._action_lock.locked()
-        return {}
 
     result._async_update_data_unlocked = AsyncMock(side_effect=work)
     await result._async_update_data()
@@ -82,7 +81,7 @@ async def test_command_poll_and_manual_force_cannot_replace_active_session(monke
     result.hass.async_add_executor_job.side_effect = job
     command = asyncio.create_task(result.async_lock_vehicle("synthetic"))
     await started.wait()
-    assert await result._async_update_data() == {}
+    assert await result._async_update_data() is None
     with pytest.raises(HomeAssistantError, match="operation is in progress"):
         await result.async_force_refresh_vehicle("synthetic")
     release.set()

@@ -2,8 +2,9 @@
 
 from datetime import time
 import logging
-from typing import Any
+from typing import Any, cast
 
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import ATTR_DEVICE_ID
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError
@@ -17,7 +18,7 @@ from ._api import (
     WindowRequestOptions,
 )
 from .const import DOMAIN, OffPeakChargingMode
-from .coordinator import JapanDataUpdateCoordinator
+from .coordinator import HyundaiJPConfigEntry, JapanDataUpdateCoordinator
 from .service_schemas import SERVICE_SCHEMAS
 
 SERVICE_UPDATE = "update"
@@ -348,18 +349,26 @@ def async_setup_services(hass: HomeAssistant) -> bool:
     return True
 
 
-@callback
-def async_unload_services(hass: HomeAssistant) -> None:
-    """Remove the integration's services."""
-    for service in SUPPORTED_SERVICES:
-        hass.services.async_remove(DOMAIN, service)
+def _loaded_coordinators(hass: HomeAssistant) -> dict[str, JapanDataUpdateCoordinator]:
+    """Read only active, owned account runtimes; unloaded entries retain no target."""
+    result = {}
+    for raw_entry in hass.config_entries.async_entries(DOMAIN):
+        entry = cast(HyundaiJPConfigEntry, raw_entry)
+        if entry.state is not ConfigEntryState.LOADED or entry.unique_id is None:
+            continue
+        coordinator: JapanDataUpdateCoordinator | None = getattr(
+            entry, "runtime_data", None
+        )
+        if coordinator is not None and coordinator.config_entry is entry:
+            result[entry.entry_id] = coordinator
+    return result
 
 
 def _resolve_vehicle_target(
     hass: HomeAssistant, call: ServiceCall
 ) -> tuple[JapanDataUpdateCoordinator, str]:
     """Resolve one active account/vehicle pair, respecting an explicit device."""
-    coordinators: dict[str, JapanDataUpdateCoordinator] = hass.data.get(DOMAIN, {})
+    coordinators = _loaded_coordinators(hass)
     if ATTR_DEVICE_ID not in call.data:
         if len(coordinators) == 1:
             only_coordinator = next(iter(coordinators.values()))
@@ -380,7 +389,7 @@ def _resolve_vehicle_target(
         entry = hass.config_entries.async_get_entry(entry_id)
         if entry is None or entry.domain != DOMAIN or entry.unique_id is None:
             continue
-        coordinator = coordinators.get(entry.unique_id)
+        coordinator = coordinators.get(entry_id)
         if (
             coordinator is None
             or coordinator.config_entry is None
@@ -412,7 +421,7 @@ def _resolve_account_target(
     if ATTR_DEVICE_ID in call.data:
         coordinator, _ = _resolve_vehicle_target(hass, call)
         return coordinator
-    coordinators: dict[str, JapanDataUpdateCoordinator] = hass.data.get(DOMAIN, {})
+    coordinators = _loaded_coordinators(hass)
     if len(coordinators) == 1:
         return next(iter(coordinators.values()))
     raise HomeAssistantError(

@@ -2,16 +2,16 @@
 
 import logging
 
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.device_registry import DeviceEntry
+from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN
-from .coordinator import JapanDataUpdateCoordinator
-from .services import async_setup_services, async_unload_services
+from .coordinator import HyundaiJPConfigEntry, JapanDataUpdateCoordinator
+from .services import async_setup_services
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
@@ -32,7 +32,15 @@ PLATFORMS: list[str] = [
 ]
 
 
-async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Register account-independent services once for this integration."""
+    async_setup_services(hass)
+    return True
+
+
+async def async_setup_entry(
+    hass: HomeAssistant, config_entry: HyundaiJPConfigEntry
+) -> bool:
     """Set up Hyundai Bluelink JP from a config entry."""
     coordinator = JapanDataUpdateCoordinator(hass, config_entry)
     try:
@@ -44,10 +52,8 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
         await _async_shutdown_coordinator(coordinator)
         raise ConfigEntryNotReady(f"Config Not Ready: {ex}") from ex
 
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][config_entry.unique_id] = coordinator
+    config_entry.runtime_data = coordinator
     await hass.config_entries.async_forward_entry_setups(config_entry, PLATFORMS)
-    async_setup_services(hass)
     return True
 
 
@@ -62,20 +68,19 @@ async def _async_shutdown_coordinator(
         )
 
 
-async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
+async def async_unload_entry(
+    hass: HomeAssistant, config_entry: HyundaiJPConfigEntry
+) -> bool:
     """Unload a config entry."""
     if unload_ok := await hass.config_entries.async_unload_platforms(
         config_entry, PLATFORMS
     ):
-        await _async_shutdown_coordinator(hass.data[DOMAIN][config_entry.unique_id])
-        del hass.data[DOMAIN][config_entry.unique_id]
-    if not hass.data[DOMAIN]:
-        async_unload_services(hass)
+        await _async_shutdown_coordinator(config_entry.runtime_data)
     return unload_ok
 
 
 async def async_remove_config_entry_device(
-    hass: HomeAssistant, config_entry: ConfigEntry, device_entry: DeviceEntry
+    hass: HomeAssistant, config_entry: HyundaiJPConfigEntry, device_entry: DeviceEntry
 ) -> bool:
     """Remove a config entry from a device."""
     return True

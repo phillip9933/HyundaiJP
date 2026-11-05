@@ -7,13 +7,12 @@ from dataclasses import dataclass
 from typing import Final
 
 from homeassistant.components.button import ButtonEntity, ButtonEntityDescription
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from ._api import Vehicle
 from .const import DOMAIN
-from .coordinator import JapanDataUpdateCoordinator
+from .coordinator import HyundaiJPConfigEntry, JapanDataUpdateCoordinator
 from .entity import HyundaiBluelinkEntity
 
 
@@ -22,7 +21,6 @@ class HyundaiBluelinkButtonDescription(ButtonEntityDescription):
     """Describes a Hyundai Bluelink JP button entity."""
 
     press_action: str
-    command: str | None = None
     exists_fn: Callable[[Vehicle], bool] = lambda _: True
     enabled_fn: Callable[[Vehicle], bool] = lambda _: True
 
@@ -36,7 +34,6 @@ BUTTON_DESCRIPTIONS: Final[tuple[HyundaiBluelinkButtonDescription, ...]] = (
     ),
     HyundaiBluelinkButtonDescription(
         key="start_hazard_lights",
-        command="start_hazard_lights",
         translation_key="start_hazard_lights",
         icon="mdi:hazard-lights",
         press_action="async_start_hazard_lights",
@@ -44,7 +41,6 @@ BUTTON_DESCRIPTIONS: Final[tuple[HyundaiBluelinkButtonDescription, ...]] = (
     ),
     HyundaiBluelinkButtonDescription(
         key="start_hazard_lights_and_horn",
-        command="start_hazard_lights_and_horn",
         translation_key="start_hazard_lights_and_horn",
         icon="mdi:car-emergency",
         press_action="async_start_hazard_lights_and_horn",
@@ -52,7 +48,6 @@ BUTTON_DESCRIPTIONS: Final[tuple[HyundaiBluelinkButtonDescription, ...]] = (
     ),
     HyundaiBluelinkButtonDescription(
         key="start_valet_mode",
-        command="valet_mode_action",
         translation_key="start_valet_mode",
         icon="mdi:key-variant",
         press_action="async_start_valet_mode",
@@ -60,7 +55,6 @@ BUTTON_DESCRIPTIONS: Final[tuple[HyundaiBluelinkButtonDescription, ...]] = (
     ),
     HyundaiBluelinkButtonDescription(
         key="stop_valet_mode",
-        command="valet_mode_action",
         translation_key="stop_valet_mode",
         icon="mdi:key-variant",
         press_action="async_stop_valet_mode",
@@ -68,7 +62,6 @@ BUTTON_DESCRIPTIONS: Final[tuple[HyundaiBluelinkButtonDescription, ...]] = (
     ),
     HyundaiBluelinkButtonDescription(
         key="open_all_windows",
-        command="set_windows_state",
         translation_key="open_all_windows",
         icon="mdi:window-maximize",
         press_action="async_open_all_windows",
@@ -79,7 +72,6 @@ BUTTON_DESCRIPTIONS: Final[tuple[HyundaiBluelinkButtonDescription, ...]] = (
     ),
     HyundaiBluelinkButtonDescription(
         key="close_all_windows",
-        command="set_windows_state",
         translation_key="close_all_windows",
         icon="mdi:window-minimize",
         press_action="async_close_all_windows",
@@ -90,7 +82,6 @@ BUTTON_DESCRIPTIONS: Final[tuple[HyundaiBluelinkButtonDescription, ...]] = (
     ),
     HyundaiBluelinkButtonDescription(
         key="vent_all_windows",
-        command="set_windows_state",
         translation_key="vent_all_windows",
         icon="mdi:window-open-variant",
         press_action="async_vent_all_windows",
@@ -101,7 +92,6 @@ BUTTON_DESCRIPTIONS: Final[tuple[HyundaiBluelinkButtonDescription, ...]] = (
     ),
     HyundaiBluelinkButtonDescription(
         key="capture_svm_image",
-        command="request_svm_capture",
         translation_key="capture_svm_image",
         icon="mdi:camera-iris",
         press_action="async_request_svm_capture",
@@ -112,19 +102,15 @@ BUTTON_DESCRIPTIONS: Final[tuple[HyundaiBluelinkButtonDescription, ...]] = (
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    config_entry: ConfigEntry,
+    config_entry: HyundaiJPConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up button entities from a config entry."""
-    coordinator = hass.data[DOMAIN][config_entry.unique_id]
+    coordinator = config_entry.runtime_data
     entities = []
     for vehicle_id in coordinator.vehicle_manager.vehicles:
         vehicle: Vehicle = coordinator.vehicle_manager.vehicles[vehicle_id]
         for description in BUTTON_DESCRIPTIONS:
-            if description.command is not None and not coordinator.supports_command(
-                description.command
-            ):
-                continue
             if not description.exists_fn(vehicle):
                 continue
             entities.append(HyundaiBluelinkButton(coordinator, description, vehicle))

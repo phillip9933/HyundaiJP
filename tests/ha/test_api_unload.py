@@ -27,7 +27,12 @@ async def test_failed_platform_unload_keeps_api_session_open():
         ),
         async_add_executor_job=AsyncMock(),
     )
-    assert not await async_unload_entry(hass, SimpleNamespace(unique_id="synthetic"))
+    assert not await async_unload_entry(
+        hass,
+        SimpleNamespace(
+            unique_id="synthetic", runtime_data=hass.data[DOMAIN]["synthetic"]
+        ),
+    )
     hass.async_add_executor_job.assert_not_awaited()
     assert "synthetic" in hass.data[DOMAIN]
 
@@ -49,8 +54,12 @@ async def test_unload_uses_shutdown_hook(monkeypatch):
         ),
         async_add_executor_job=AsyncMock(),
     )
-    monkeypatch.setattr("custom_components.hyundai_jp.async_unload_services", Mock())
-    assert await async_unload_entry(hass, SimpleNamespace(unique_id="synthetic"))
+    assert await async_unload_entry(
+        hass,
+        SimpleNamespace(
+            unique_id="synthetic", runtime_data=hass.data[DOMAIN]["synthetic"]
+        ),
+    )
     shutdown.assert_awaited_once_with()
     hass.async_add_executor_job.assert_not_awaited()
     close.assert_not_called()
@@ -73,7 +82,12 @@ async def test_failed_platform_unload_does_not_start_shutdown():
         ),
         async_add_executor_job=AsyncMock(),
     )
-    assert not await async_unload_entry(hass, SimpleNamespace(unique_id="synthetic"))
+    assert not await async_unload_entry(
+        hass,
+        SimpleNamespace(
+            unique_id="synthetic", runtime_data=hass.data[DOMAIN]["synthetic"]
+        ),
+    )
     shutdown.assert_not_awaited()
     close.assert_not_called()
     assert "synthetic" in hass.data[DOMAIN]
@@ -102,11 +116,12 @@ async def test_unload_drains_existing_command_and_blocks_new_commands(monkeypatc
     result.async_await_action_and_refresh = AsyncMock(side_effect=confirmation)
     result.hass.data = {DOMAIN: {"synthetic": result}}
     result.hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
-    monkeypatch.setattr("custom_components.hyundai_jp.async_unload_services", Mock())
     command = asyncio.create_task(result.async_unlock_vehicle("synthetic"))
     await entered.wait()
     unloading = asyncio.create_task(
-        async_unload_entry(result.hass, SimpleNamespace(unique_id="synthetic"))
+        async_unload_entry(
+            result.hass, SimpleNamespace(unique_id="synthetic", runtime_data=result)
+        )
     )
     try:
         # Shutdown marks closing before waiting for the operation lock.
@@ -129,4 +144,4 @@ async def test_unload_drains_existing_command_and_blocks_new_commands(monkeypatc
     result._async_unsub_shutdown.assert_called_once_with()
     result._debounced_refresh.async_shutdown.assert_called_once_with()
     result.vehicle_manager.lock.assert_not_called()
-    assert result.hass.data[DOMAIN] == {}
+    assert result.hass.data[DOMAIN]["synthetic"] is result

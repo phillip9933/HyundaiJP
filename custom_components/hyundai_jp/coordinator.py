@@ -92,13 +92,16 @@ class _UnconfirmedCommandError(HomeAssistantError):
     request_rejected = False
 
 
-class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
+type HyundaiJPConfigEntry = ConfigEntry[JapanDataUpdateCoordinator]
+
+
+class JapanDataUpdateCoordinator(DataUpdateCoordinator[None]):
     """Manage Japan commands, polling, camera state and completion tracking."""
 
     _POST_COMMAND_WATCH_SECONDS = 120
     _POST_COMMAND_POLL_INTERVAL_SECONDS = 2
 
-    def __init__(self, hass: HomeAssistant, config_entry: ConfigEntry) -> None:
+    def __init__(self, hass: HomeAssistant, config_entry: HyundaiJPConfigEntry) -> None:
         """Initialize."""
         self._initialize_runtime_state()
 
@@ -157,7 +160,6 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Create owned state before scheduling any vehicle or camera work."""
         self._action_lock = asyncio.Lock()
         self._closing = False
-        self._shutdown_started = False
         self._shutdown_task: asyncio.Task[None] | None = None
         self._api_jobs: set[asyncio.Future[Any]] = set()
         self._svm = SVMImageCache()
@@ -191,7 +193,7 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_api_job(self, target: Callable[..., _T], *args: Any) -> _T:
         """Keep executor work owned until completion, even if its caller cancels."""
-        if self._shutdown_started:
+        if self._closing:
             raise HomeAssistantError("The integration is shutting down")
         job = asyncio.ensure_future(self.hass.async_add_executor_job(target, *args))
         self._api_jobs.add(job)
@@ -209,7 +211,7 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await asyncio.gather(*self._api_jobs, return_exceptions=True)
             await self.hass.async_add_executor_job(self.vehicle_manager.close)
 
-    async def _async_poll_data(self) -> dict[str, Any]:
+    async def _async_poll_data(self) -> None:
         """Update data via library. Called by update_coordinator periodically.
 
         Allow to update for the first time without further checking
@@ -261,7 +263,6 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
         await self._async_poll_vehicles(mode="check" if in_force_window else "cached")
-        return self.data
 
     async def _async_update_all_unlocked(self) -> None:
         """Update vehicle data."""
@@ -563,27 +564,9 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             updated_data = {**config_entry.data, CONF_TOKEN: new_token}
             self.hass.config_entries.async_update_entry(config_entry, data=updated_data)
 
-    def supports_command(self, command: str) -> bool:
-        """Whether this API implements the named vehicle command."""
-        commands = self.vehicle_manager.supported_commands
-        return commands is None or command in commands
-
-    def _require_command(self, command: str) -> None:
-        self._require_remote_commands()
-        if not self.supports_command(command):
-            raise HomeAssistantError(
-                "This region does not support this vehicle command"
-            )
-
     def _ensure_not_closing(self) -> None:
         if self._closing:
             raise HomeAssistantError("The integration is shutting down")
-
-    def _require_remote_commands(self) -> None:
-        self._ensure_not_closing()
-
-    def _require_force_refresh(self) -> None:
-        self._ensure_not_closing()
 
     @asynccontextmanager
     async def _async_region_operation(self) -> AsyncIterator[None]:
@@ -622,7 +605,6 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_shutdown(self) -> None:
         """Share one shielded cleanup across explicit and HA unload callbacks."""
         self._closing = True
-        self._shutdown_started = True
         self._pending_commands.close()
         shutdown = self._shutdown_task
         if shutdown is None:
@@ -670,16 +652,16 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self.hass.async_add_executor_job(close)
                 )
 
-    async def _async_update_data(self) -> dict[str, Any]:
+    async def _async_update_data(self) -> None:
         if self._closing:
-            return self.data
+            return
         if self._action_lock.locked():
-            return self.data
+            return
         async with self._action_lock:
-            return await self._async_update_data_unlocked()
+            await self._async_update_data_unlocked()
 
-    async def _async_update_data_unlocked(self) -> dict[str, Any]:
-        return await self._async_complete_operation(self._async_poll_data())
+    async def _async_update_data_unlocked(self) -> None:
+        await self._async_complete_operation(self._async_poll_data())
 
     async def async_update_all(self) -> None:
         """Update vehicle data while preserving Japan's operation lock."""
@@ -688,7 +670,7 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_force_update_all(self) -> None:
         """Force refresh vehicle data while preserving Japan's operation lock."""
-        self._require_force_refresh()
+        self._ensure_not_closing()
         async with self._async_region_operation():
             await self._async_complete_operation(
                 self._async_force_update_all_unlocked()
@@ -696,7 +678,7 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_force_refresh_vehicle(self, vehicle_id: str) -> None:
         """Force refresh a single vehicle's state."""
-        self._require_force_refresh()
+        self._ensure_not_closing()
         async with self._async_region_operation():
             await self.async_check_and_refresh_token()
             await self._async_run_executor_job(
@@ -722,7 +704,7 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_request_svm_capture(self, vehicle_id: str) -> SVMDetails:
         """Trigger a fresh SVM capture and update the cached details."""
-        self._require_command("request_svm_capture")
+        self._ensure_not_closing()
         async with self._async_region_operation():
             return await self._async_complete_operation(
                 self._async_capture_svm_locked(vehicle_id)
@@ -910,8 +892,6 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self.vehicle_manager.check_action_status,
                 vehicle_id,
                 action_id,
-                False,
-                0,
             )
             self._pending_commands.receipt(vehicle_id, action_id, status)
             self._check_command_confirmation(status)
@@ -925,20 +905,12 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 ):
                     self._start_post_command_state_watch(vehicle_id)
 
-    async def async_await_action_and_force_refresh(
-        self, vehicle_id: str, action_id: str
-    ) -> None:
-        """Read the Japan receipt and cache without a second vehicle command."""
-        await self.async_await_action_and_refresh(vehicle_id, action_id)
-
     async def _async_send_action(
         self,
         vehicle_id: str,
         action_fn: Callable[[], Any],
         error_label: str,
         *,
-        force_refresh: bool = False,
-        command: str | None = None,
         pending_actuator: str | None = None,
         pending_target: bool | None = None,
     ) -> None:
@@ -949,12 +921,7 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         already in progress, raises HomeAssistantError immediately so
         the user gets a clear message instead of a mysterious long wait.
         """
-        if command is None:
-            self._require_remote_commands()
-        else:
-            self._require_command(command)
-        if force_refresh:
-            self._require_force_refresh()
+        self._ensure_not_closing()
         if self._action_lock.locked():
             _LOGGER.warning(
                 "Vehicle action '%s' rejected: another action is already in progress",
@@ -977,7 +944,6 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         vehicle_id,
                         action_fn,
                         error_label,
-                        force_refresh,
                         pending_actuator,
                     )
                 )
@@ -995,7 +961,6 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         vehicle_id: str,
         action_fn: Callable[[], Any],
         error_label: str,
-        force_refresh: bool,
         pending_actuator: str | None = None,
     ) -> None:
         """Hold the caller's operation lock through submission and confirmation."""
@@ -1047,10 +1012,7 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if pending_actuator is not None:
             self._pending_commands.submitted(vehicle_id, pending_actuator, action_id)
         try:
-            if force_refresh:
-                await self.async_await_action_and_force_refresh(vehicle_id, action_id)
-            else:
-                await self.async_await_action_and_refresh(vehicle_id, action_id)
+            await self.async_await_action_and_refresh(vehicle_id, action_id)
         except _ConfirmedCommandRefreshError, _UnconfirmedCommandError:
             raise
         except Exception as err:
@@ -1063,7 +1025,6 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             vehicle_id,
             lambda: self.vehicle_manager.lock(vehicle_id),
             "lock vehicle",
-            command="lock_action",
             pending_actuator="door_lock",
             pending_target=True,
         )
@@ -1073,7 +1034,6 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             vehicle_id,
             lambda: self.vehicle_manager.unlock(vehicle_id),
             "unlock vehicle",
-            command="lock_action",
             pending_actuator="door_lock",
             pending_target=False,
         )
@@ -1083,7 +1043,6 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             vehicle_id,
             lambda: self.vehicle_manager.open_charge_port(vehicle_id),
             "open charge port",
-            command="charge_port_action",
             pending_actuator="charge_port",
             pending_target=True,
         )
@@ -1093,7 +1052,6 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             vehicle_id,
             lambda: self.vehicle_manager.close_charge_port(vehicle_id),
             "close charge port",
-            command="charge_port_action",
             pending_actuator="charge_port",
             pending_target=False,
         )
@@ -1105,7 +1063,6 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             vehicle_id,
             lambda: self.vehicle_manager.start_climate(vehicle_id, climate_options),
             "start climate",
-            command="start_climate",
         )
 
     _CLIMATE_RESTART_DELAY_SECONDS = 5
@@ -1118,8 +1075,7 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self, vehicle_id: str, climate_options: ClimateRequestOptions
     ) -> None:
         """Own validation, stop, pause and restart as one serialized operation."""
-        self._require_command("stop_climate")
-        self._require_command("start_climate")
+        self._ensure_not_closing()
         async with self._async_region_operation():
             options = replace(climate_options)
             await self._async_complete_operation(
@@ -1142,7 +1098,6 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 vehicle_id,
                 lambda: self.vehicle_manager.stop_climate(vehicle_id),
                 "stop climate",
-                False,
             )
         except _ConfirmedCommandRefreshError as err:
             raise _ClimateRestartNotSubmittedError(
@@ -1161,7 +1116,6 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 vehicle_id,
                 lambda: self.vehicle_manager.start_climate(vehicle_id, options),
                 "start climate",
-                False,
             )
         except HomeAssistantError as err:
             raise HomeAssistantError(
@@ -1174,7 +1128,6 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             vehicle_id,
             lambda: self.vehicle_manager.stop_climate(vehicle_id),
             "stop climate",
-            command="stop_climate",
         )
 
     async def async_start_charge(self, vehicle_id: str) -> None:
@@ -1182,7 +1135,6 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             vehicle_id,
             lambda: self.vehicle_manager.start_charge(vehicle_id),
             "start charge",
-            command="start_charge",
         )
 
     async def async_stop_charge(self, vehicle_id: str) -> None:
@@ -1190,7 +1142,6 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             vehicle_id,
             lambda: self.vehicle_manager.stop_charge(vehicle_id),
             "stop charge",
-            command="stop_charge",
         )
 
     async def async_set_charge_limits(self, vehicle_id: str, ac: int, dc: int) -> None:
@@ -1198,7 +1149,6 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             vehicle_id,
             lambda: self.vehicle_manager.set_charge_limits(vehicle_id, ac, dc),
             "set charge limits",
-            command="set_charge_limits",
         )
 
     async def async_set_charging_current(self, vehicle_id: str, level: int) -> None:
@@ -1206,7 +1156,6 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             vehicle_id,
             lambda: self.vehicle_manager.set_charging_current(vehicle_id, level),
             "set charging current",
-            command="set_charging_current",
         )
 
     async def async_schedule_charging_and_climate(
@@ -1218,7 +1167,6 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 vehicle_id, schedule_options
             ),
             "schedule charging and climate",
-            command="schedule_charging_and_climate",
         )
 
     async def async_start_hazard_lights(self, vehicle_id: str) -> None:
@@ -1226,7 +1174,6 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             vehicle_id,
             lambda: self.vehicle_manager.start_hazard_lights(vehicle_id),
             "start hazard lights",
-            command="start_hazard_lights",
         )
 
     async def async_start_hazard_lights_and_horn(self, vehicle_id: str) -> None:
@@ -1234,7 +1181,6 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             vehicle_id,
             lambda: self.vehicle_manager.start_hazard_lights_and_horn(vehicle_id),
             "start hazard lights and horn",
-            command="start_hazard_lights_and_horn",
         )
 
     async def async_start_valet_mode(self, vehicle_id: str) -> None:
@@ -1242,7 +1188,6 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             vehicle_id,
             lambda: self.vehicle_manager.start_valet_mode(vehicle_id),
             "start valet mode",
-            command="valet_mode_action",
         )
 
     async def async_stop_valet_mode(self, vehicle_id: str) -> None:
@@ -1250,7 +1195,6 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             vehicle_id,
             lambda: self.vehicle_manager.stop_valet_mode(vehicle_id),
             "stop valet mode",
-            command="valet_mode_action",
         )
 
     async def async_set_v2l_limit(self, vehicle_id: str, limit: int) -> None:
@@ -1260,7 +1204,6 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 vehicle_id, limit
             ),
             "set V2L limit",
-            command="set_vehicle_to_load_discharge_limit",
         )
 
     async def async_set_windows(
@@ -1270,7 +1213,6 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             vehicle_id,
             lambda: self.vehicle_manager.set_windows_state(vehicle_id, windowOptions),
             "set windows",
-            command="set_windows_state",
         )
 
     async def async_set_navigation(
@@ -1280,7 +1222,6 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             vehicle_id,
             lambda: self.vehicle_manager.set_navigation(vehicle_id, poi_list),
             "set navigation",
-            command="set_navigation",
         )
 
     def _window_options(
@@ -1303,7 +1244,6 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             vehicle_id,
             lambda: self.vehicle_manager.set_windows_state(vehicle_id, options),
             "open all windows",
-            command="set_windows_state",
         )
 
     async def async_close_all_windows(self, vehicle_id: str) -> None:
@@ -1312,7 +1252,6 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             vehicle_id,
             lambda: self.vehicle_manager.set_windows_state(vehicle_id, options),
             "close all windows",
-            command="set_windows_state",
         )
 
     async def async_vent_all_windows(self, vehicle_id: str) -> None:
@@ -1321,5 +1260,4 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             vehicle_id,
             lambda: self.vehicle_manager.set_windows_state(vehicle_id, options),
             "vent all windows",
-            command="set_windows_state",
         )

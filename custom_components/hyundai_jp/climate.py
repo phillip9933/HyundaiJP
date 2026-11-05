@@ -14,7 +14,6 @@ from homeassistant.components.climate.const import (
     HVACAction,
     HVACMode,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
@@ -25,7 +24,7 @@ from ._api import ClimateRequestOptions, Vehicle
 from ._api.exceptions import UnsupportedControlError
 from ._api.utils import flag_or_none
 from .const import DOMAIN
-from .coordinator import JapanDataUpdateCoordinator
+from .coordinator import HyundaiJPConfigEntry, JapanDataUpdateCoordinator
 from .entity import HyundaiBluelinkEntity
 
 
@@ -55,17 +54,11 @@ def _submission_is_uncertain(error: BaseException) -> bool:
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    config_entry: ConfigEntry,
+    config_entry: HyundaiJPConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up climate platform."""
-    coordinator = hass.data[DOMAIN][config_entry.unique_id]
-    if not (
-        coordinator.supports_command("start_climate")
-        and coordinator.supports_command("stop_climate")
-    ):
-        async_add_entities([])
-        return
+    coordinator = config_entry.runtime_data
     entities = []
     for vehicle in coordinator.vehicle_manager.vehicles.values():
         if vehicle.air_control_is_on is not None:

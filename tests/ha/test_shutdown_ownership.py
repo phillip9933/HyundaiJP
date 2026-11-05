@@ -87,7 +87,7 @@ async def test_cancelling_one_shutdown_waiter_keeps_worker_and_shared_owner(
     await entered.wait()
     first = asyncio.create_task(owner.async_shutdown())
     second = asyncio.create_task(owner.async_shutdown())
-    while not getattr(owner, "_shutdown_started", False):
+    while not getattr(owner, "_closing", False):
         await asyncio.sleep(0)
     first.cancel()
     await asyncio.sleep(0)
@@ -209,12 +209,10 @@ async def test_explicit_unload_and_real_ha_unload_callback_close_once(
     owner = JapanDataUpdateCoordinator(hass, entry)
     assert owner.config_entry is entry
     assert owner.async_shutdown in entry._on_unload
-    hass.data[DOMAIN] = {entry.unique_id: owner}
+    entry.runtime_data = owner
     hass.config_entries = SimpleNamespace(
         async_unload_platforms=AsyncMock(return_value=True)
     )
-    services = Mock()
-    monkeypatch.setattr(hyundai_jp, "async_unload_services", services)
     assert await hyundai_jp.async_unload_entry(hass, entry)
     shared = owner._shutdown_task
     assert owner._shutdown_requested
@@ -225,8 +223,7 @@ async def test_explicit_unload_and_real_ha_unload_callback_close_once(
     assert owner._shutdown_task is shared and shared.done()
     manager.close.assert_called_once()
     adapter_close.assert_called_once()
-    services.assert_called_once_with(hass)
-    assert hass.data[DOMAIN] == {}
+    assert DOMAIN not in hass.data
     assert not entry._on_unload
 
 
@@ -260,11 +257,10 @@ async def test_real_ha_unload_callback_logs_only_sanitized_shared_failure(
 
     monkeypatch.setattr(hass, "async_add_executor_job", AsyncMock(side_effect=execute))
     owner = JapanDataUpdateCoordinator(hass, entry)
-    hass.data[DOMAIN] = {entry.unique_id: owner}
+    entry.runtime_data = owner
     hass.config_entries = SimpleNamespace(
         async_unload_platforms=AsyncMock(return_value=True)
     )
-    monkeypatch.setattr(hyundai_jp, "async_unload_services", Mock())
     assert await hyundai_jp.async_unload_entry(hass, entry)
     shared = owner._shutdown_task
     manager.close.assert_called_once()

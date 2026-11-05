@@ -31,13 +31,14 @@ async def test_setup_and_unload_only_the_new_domain(monkeypatch):
         services=MagicMock(),
     )
     entry = SimpleNamespace(unique_id="new-entry", domain=DOMAIN)
+    assert await hyundai_jp.async_setup(hass, {})
     assert await hyundai_jp.async_setup_entry(hass, entry)
     factory.assert_called_once_with(hass, entry)
     coordinator.async_config_entry_first_refresh.assert_awaited_once()
     hass.config_entries.async_forward_entry_setups.assert_awaited_once_with(
         entry, hyundai_jp.PLATFORMS
     )
-    assert hass.data[DOMAIN]["new-entry"] is coordinator
+    assert entry.runtime_data is coordinator
     assert {call.args[0] for call in hass.services.async_register.call_args_list} == {
         DOMAIN
     }
@@ -46,10 +47,8 @@ async def test_setup_and_unload_only_the_new_domain(monkeypatch):
     coordinator.async_shutdown.assert_awaited_once()
     old_coordinator.async_shutdown.assert_not_awaited()
     assert hass.data["kia_uvo"]["old-entry"] is old_coordinator
-    assert hass.data[DOMAIN] == {}
-    assert {call.args[0] for call in hass.services.async_remove.call_args_list} == {
-        DOMAIN
-    }
+    assert DOMAIN not in hass.data
+    hass.services.async_remove.assert_not_called()
 
 
 def test_manifest_uses_the_bundled_api_and_independent_branding():

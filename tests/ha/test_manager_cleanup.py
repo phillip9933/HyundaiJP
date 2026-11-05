@@ -14,7 +14,6 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 import pytest
 
 from custom_components import hyundai_jp
-from custom_components.hyundai_jp.const import DOMAIN
 from tests.ha.helpers import make_cleanup_coordinator, make_unload_context
 
 
@@ -59,18 +58,13 @@ async def test_successful_unload_closes_only_that_manager(monkeypatch, stop_poll
     other_close = Mock()
     result = make_cleanup_coordinator(SimpleNamespace(close=close))
     hass, entry = make_unload_context(result)
-    hass.data[DOMAIN]["other-entry"] = make_cleanup_coordinator(
-        SimpleNamespace(close=other_close)
-    )
-    services = Mock()
-    monkeypatch.setattr(hyundai_jp, "async_unload_services", services)
+    other = make_cleanup_coordinator(SimpleNamespace(close=other_close))
 
     assert await hyundai_jp.async_unload_entry(hass, entry)
 
     close.assert_called_once()
     other_close.assert_not_called()
-    assert list(hass.data[DOMAIN]) == ["other-entry"]
-    services.assert_not_called()
+    other.vehicle_manager.close.assert_not_called()
 
 
 async def test_failed_platform_unload_leaves_manager_running(stop_polling):
@@ -82,7 +76,7 @@ async def test_failed_platform_unload_leaves_manager_running(stop_polling):
 
     stop_polling.assert_not_awaited()
     close.assert_not_called()
-    assert entry.unique_id in hass.data[DOMAIN]
+    assert entry.runtime_data is result
 
 
 async def test_cleanup_failure_is_sanitized_and_does_not_block_unload(
@@ -92,16 +86,13 @@ async def test_cleanup_failure_is_sanitized_and_does_not_block_unload(
         SimpleNamespace(close=Mock(side_effect=RuntimeError("PRIVATE_ACCOUNT_DATA")))
     )
     hass, entry = make_unload_context(result)
-    services = Mock()
-    monkeypatch.setattr(hyundai_jp, "async_unload_services", services)
 
     assert await hyundai_jp.async_unload_entry(hass, entry)
 
-    assert hass.data[DOMAIN] == {}
+    assert entry.runtime_data is result
     assert "Unable to shut down vehicle connection (HomeAssistantError)" in caplog.text
     assert "Japan shutdown vehicle manager failed (RuntimeError)" in caplog.text
     assert "PRIVATE_ACCOUNT_DATA" not in caplog.text
-    services.assert_called_once_with(hass)
 
 
 @pytest.mark.parametrize(
@@ -179,7 +170,7 @@ async def test_shutdown_drains_active_poll_and_blocks_fallback(mode, stop_pollin
     polling = asyncio.create_task(result._async_poll_vehicle("synthetic", mode=mode))
     await started.wait()
     shutdown = asyncio.create_task(result.async_shutdown())
-    while not getattr(result, "_shutdown_started", False):
+    while not getattr(result, "_closing", False):
         await asyncio.sleep(0)
     assert not close.called
     release.set()
@@ -223,7 +214,7 @@ async def test_cancelled_api_caller_keeps_worker_owned_until_shutdown(
     with pytest.raises(asyncio.CancelledError):
         await caller
     shutdown = asyncio.create_task(result.async_shutdown())
-    while not getattr(result, "_shutdown_started", False):
+    while not getattr(result, "_closing", False):
         await asyncio.sleep(0)
     assert not close.called
     release.set()
@@ -268,7 +259,7 @@ async def test_cancelled_shutdown_still_drains_worker_and_closes(stop_polling):
     caller = asyncio.create_task(result._async_api_job(target))
     await started.wait()
     shutdown = asyncio.create_task(result.async_shutdown())
-    while not getattr(result, "_shutdown_started", False):
+    while not getattr(result, "_closing", False):
         await asyncio.sleep(0)
     shutdown.cancel()
     await asyncio.sleep(0)

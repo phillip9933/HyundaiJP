@@ -61,7 +61,7 @@ async def test_unlocked_japan_read_drains_before_shared_and_adapter_cleanup(
         await asyncio.sleep(0)
         assert not caller.done()
     shutdown = asyncio.create_task(result.async_shutdown())
-    while not getattr(result, "_shutdown_started", False):
+    while not getattr(result, "_closing", False):
         await asyncio.sleep(0)
     manager_close.assert_not_called()
     adapter_close.assert_not_called()

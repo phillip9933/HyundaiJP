@@ -13,7 +13,6 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any
 
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_SCAN_INTERVAL
 from homeassistant.core import HomeAssistant
 from homeassistant.loader import async_get_integration
@@ -35,7 +34,7 @@ from .const import (
     HYUNDAI_BRAND,
     JAPAN_REGION,
 )
-from .coordinator import JapanDataUpdateCoordinator
+from .coordinator import HyundaiJPConfigEntry, JapanDataUpdateCoordinator
 from .redact import redact
 
 
@@ -50,21 +49,16 @@ def _token_meta(token: Token | None) -> dict[str, Any]:
     metadata: dict[str, Any] = redact(
         {
             "valid_until": token.valid_until.isoformat() if token.valid_until else None,
-            # Retained as null for diagnostic schema compatibility. Japan's
-            # token has no separate CCS expiry or broker-address fields.
-            "ccs_valid_until": None,
             "control_expiry": token.control_token_expiry,
             "mqtt_client_id": token.mqtt_client_id,
             "mqtt_client_present": bool(token.mqtt_client_id),
-            "mqtt_broker_host": None,
-            "mqtt_broker_port": None,
             "device_present": bool(token.device_id),
         }
     )
     return metadata
 
 
-def _config_options(entry: ConfigEntry) -> dict[str, Any]:
+def _config_options(entry: HyundaiJPConfigEntry) -> dict[str, Any]:
     """Return the effective options (option or default).
 
     The dump reflects what the integration runs with, not a field of nulls.
@@ -109,12 +103,10 @@ def _vehicles_payload(
 
 
 async def async_get_config_entry_diagnostics(
-    hass: HomeAssistant, entry: ConfigEntry
+    hass: HomeAssistant, entry: HyundaiJPConfigEntry
 ) -> dict[str, Any]:
     """Return a redacted diagnostics snapshot for this config entry."""
-    # Hyundai Bluelink JP stores its coordinator under config_entry.unique_id (see
-    # __init__.py async_setup_entry), not entry_id.
-    coordinator: JapanDataUpdateCoordinator = hass.data[DOMAIN][entry.unique_id]
+    coordinator: JapanDataUpdateCoordinator = entry.runtime_data
     vm = coordinator.vehicle_manager
     integration = await async_get_integration(hass, DOMAIN)
 
