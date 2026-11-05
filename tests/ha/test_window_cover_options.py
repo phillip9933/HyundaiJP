@@ -9,7 +9,7 @@ from custom_components.hyundai_jp._api.ApiImpl import WindowRequestOptions
 from custom_components.hyundai_jp._api.const import WINDOW_STATE
 from custom_components.hyundai_jp.cover import (
     COVER_DESCRIPTIONS,
-    HyundaiKiaConnectCover,
+    HyundaiBluelinkCover,
 )
 
 
@@ -19,7 +19,7 @@ async def test_open_sets_only_this_window(description) -> None:
     coordinator = MagicMock()
     coordinator.async_set_windows = AsyncMock()
     vehicle = Vehicle(id="v1")
-    cover = HyundaiKiaConnectCover(coordinator, description, vehicle)
+    cover = HyundaiBluelinkCover(coordinator, description, vehicle)
 
     await cover.async_open_cover()
 

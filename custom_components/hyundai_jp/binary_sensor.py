@@ -1,4 +1,4 @@
-"""Sensor for HyundaiJP integration."""
+"""Sensor for Hyundai Bluelink JP integration."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from ._api import Vehicle
 from ._api.const import SEAT_STATUS
 from .const import DOMAIN
 from .coordinator import JapanDataUpdateCoordinator
-from .entity import HyundaiKiaConnectEntity
+from .entity import HyundaiBluelinkEntity
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -611,13 +611,13 @@ async def async_setup_entry(
 ) -> None:
     """Set up binary_sensor platform."""
     coordinator = hass.data[DOMAIN][config_entry.unique_id]
-    entities: list[HyundaiKiaConnectBinarySensor] = []
+    entities: list[HyundaiBluelinkBinarySensor] = []
     for vehicle_id in coordinator.vehicle_manager.vehicles:
         vehicle: Vehicle = coordinator.vehicle_manager.vehicles[vehicle_id]
         for description in SENSOR_DESCRIPTIONS:
             if getattr(vehicle, description.key, None) is not None:
                 entities.append(
-                    HyundaiKiaConnectBinarySensor(coordinator, description, vehicle)
+                    HyundaiBluelinkBinarySensor(coordinator, description, vehicle)
                 )
     async_add_entities(entities)
 
@@ -625,8 +625,8 @@ async def async_setup_entry(
 PARALLEL_UPDATES = 0
 
 
-class HyundaiKiaConnectBinarySensor(BinarySensorEntity, HyundaiKiaConnectEntity):
-    """HyundaiJP binary sensor class."""
+class HyundaiBluelinkBinarySensor(BinarySensorEntity, HyundaiBluelinkEntity):
+    """Hyundai Bluelink JP binary sensor class."""
 
     def __init__(
         self,

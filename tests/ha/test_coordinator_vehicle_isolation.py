@@ -22,7 +22,7 @@ from custom_components.hyundai_jp._api.exceptions import (
     ServiceTemporaryUnavailable,
 )
 from custom_components.hyundai_jp.coordinator import JapanDataUpdateCoordinator
-from custom_components.hyundai_jp.entity import HyundaiKiaConnectEntity
+from custom_components.hyundai_jp.entity import HyundaiBluelinkEntity
 
 
 class _StubDeviceRegistry:
@@ -262,7 +262,7 @@ async def test_error_state_pruned_for_removed_vehicle() -> None:
     assert coordinator._failed_vehicles == set()
 
 
-class _FakeEntity(HyundaiKiaConnectEntity):
+class _FakeEntity(HyundaiBluelinkEntity):
     """Minimal entity to exercise the availability override."""
 
 

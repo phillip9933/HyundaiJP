@@ -7,13 +7,13 @@ import pytest
 from custom_components.hyundai_jp._api import Vehicle
 from custom_components.hyundai_jp.number import (
     NUMBER_DESCRIPTIONS,
-    HyundaiKiaConnectNumber,
+    HyundaiBluelinkNumber,
 )
 
 
 @pytest.mark.parametrize("description", NUMBER_DESCRIPTIONS)
 def test_number_bounds_and_units_match_supported_controls(description):
-    entity = HyundaiKiaConnectNumber(
+    entity = HyundaiBluelinkNumber(
         MagicMock(), description, Vehicle(id="synthetic-vehicle")
     )
     bounds = (20, 80) if description.key == "ev_v2l_discharge_limit" else (50, 100)

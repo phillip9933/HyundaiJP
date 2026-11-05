@@ -1,6 +1,6 @@
-# HyundaiJP contributor instructions
+# Hyundai Bluelink JP contributor instructions
 
-HyundaiJP is an independent Japan-only Home Assistant integration. The API is
+Hyundai Bluelink JP is an independent Japan-only Home Assistant integration. The API is
 bundled in `custom_components/hyundai_jp/_api`; there is no separately released
 API package and no dependency on other regional adapters.
 

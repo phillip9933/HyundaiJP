@@ -1,4 +1,4 @@
-"""Number for HyundaiJP integration."""
+"""Number for Hyundai Bluelink JP integration."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from ._api import Vehicle
 from .const import DOMAIN
 from .coordinator import JapanDataUpdateCoordinator
-from .entity import HyundaiKiaConnectEntity
+from .entity import HyundaiBluelinkEntity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -78,7 +78,7 @@ async def async_setup_entry(
                 continue
             if getattr(vehicle, description.key, None) is not None:
                 entities.append(
-                    HyundaiKiaConnectNumber(coordinator, description, vehicle)
+                    HyundaiBluelinkNumber(coordinator, description, vehicle)
                 )
 
     async_add_entities(entities)
@@ -87,7 +87,7 @@ async def async_setup_entry(
 PARALLEL_UPDATES = 1
 
 
-class HyundaiKiaConnectNumber(NumberEntity, HyundaiKiaConnectEntity):
+class HyundaiBluelinkNumber(NumberEntity, HyundaiBluelinkEntity):
     """Charge limit or V2L limit slider."""
 
     def __init__(

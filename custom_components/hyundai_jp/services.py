@@ -1,4 +1,4 @@
-"""Services for HyundaiJP integration."""
+"""Services for Hyundai Bluelink JP integration."""
 
 from datetime import time
 import logging
@@ -70,7 +70,7 @@ _LOGGER = logging.getLogger(__name__)
 
 @callback
 def async_setup_services(hass: HomeAssistant) -> bool:
-    """Set up services for HyundaiJP."""
+    """Set up services for Hyundai Bluelink JP."""
 
     async def async_handle_force_update(call: ServiceCall) -> None:
         coordinator = _resolve_account_target(hass, call)
@@ -400,9 +400,11 @@ def _resolve_vehicle_target(
     if len(matches) == 1:
         return matches[0]
     if not matches:
-        raise HomeAssistantError("The selected device has no active HyundaiJP vehicle")
+        raise HomeAssistantError(
+            "The selected device has no active Hyundai Bluelink JP vehicle"
+        )
     raise HomeAssistantError(
-        "The selected device matches multiple active HyundaiJP vehicles"
+        "The selected device matches multiple active Hyundai Bluelink JP vehicles"
     )
 
 
@@ -417,5 +419,5 @@ def _resolve_account_target(
     if len(coordinators) == 1:
         return next(iter(coordinators.values()))
     raise HomeAssistantError(
-        "Select a vehicle device to identify the HyundaiJP account"
+        "Select a vehicle device to identify the Hyundai Bluelink JP account"
     )

@@ -1,4 +1,4 @@
-"""Independent HyundaiJP setup and services leave the old integration intact."""
+"""Independent Hyundai Bluelink JP setup and services leave the old integration intact."""
 
 import json
 from pathlib import Path
@@ -9,7 +9,7 @@ from custom_components import hyundai_jp
 from custom_components.hyundai_jp import services
 from custom_components.hyundai_jp._api import Vehicle
 from custom_components.hyundai_jp.const import DOMAIN
-from custom_components.hyundai_jp.entity import HyundaiKiaConnectEntity
+from custom_components.hyundai_jp.entity import HyundaiBluelinkEntity
 
 
 async def test_setup_and_unload_only_the_new_domain(monkeypatch):
@@ -54,7 +54,7 @@ def test_manifest_uses_the_bundled_api_and_independent_branding():
     component = Path(hyundai_jp.__file__).parent
     manifest = json.loads((component / "manifest.json").read_text())
     assert manifest["domain"] == DOMAIN == "hyundai_jp"
-    assert manifest["name"] == "HyundaiJP"
+    assert manifest["name"] == "Hyundai Bluelink JP"
     assert manifest["codeowners"] == ["@phillip9933"]
     assert manifest["documentation"] == "https://github.com/phillip9933/HyundaiJP"
     assert all("hyundai_kia_connect_api" not in dep for dep in manifest["requirements"])
@@ -67,7 +67,7 @@ def test_manifest_uses_the_bundled_api_and_independent_branding():
 def test_device_identity_has_its_own_namespace():
     vehicle = Vehicle(id="synthetic", name="synthetic", model="IONIQ 5")
     vehicle.VIN = "SYNTHETIC_TEST_VIN"
-    device = HyundaiKiaConnectEntity(MagicMock(), vehicle).device_info
+    device = HyundaiBluelinkEntity(MagicMock(), vehicle).device_info
     assert device["manufacturer"] == "Hyundai Japan"
     assert device["identifiers"] == {
         (DOMAIN, "synthetic"),

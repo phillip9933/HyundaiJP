@@ -23,7 +23,7 @@ from homeassistant.util import dt as dt_util
 from ._api import Vehicle
 from .const import DOMAIN
 from .coordinator import SIGNAL_SVM_RENDER, JapanDataUpdateCoordinator
-from .entity import HyundaiKiaConnectEntity
+from .entity import HyundaiBluelinkEntity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -78,7 +78,7 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class SVMImageEntity(ImageEntity, HyundaiKiaConnectEntity):
+class SVMImageEntity(ImageEntity, HyundaiBluelinkEntity):
     """One SVM camera view (served from the coordinator's render cache)."""
 
     _attr_content_type = "image/jpeg"
@@ -93,7 +93,7 @@ class SVMImageEntity(ImageEntity, HyundaiKiaConnectEntity):
         # ImageEntity.__init__ sets up the image-proxy client + access_tokens
         # (it does not call super().__init__, so call it explicitly).
         ImageEntity.__init__(self, coordinator.hass)
-        HyundaiKiaConnectEntity.__init__(self, coordinator, vehicle)
+        HyundaiBluelinkEntity.__init__(self, coordinator, vehicle)
         self._view = view
         self._attr_translation_key = view.translation_key
         self._attr_icon = view.icon

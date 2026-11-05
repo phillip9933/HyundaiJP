@@ -52,8 +52,8 @@ def release_files(root: Path, version: str | None = None) -> dict[str, bytes]:
     for name in (*LICENSES, PROVENANCE):
         files[name] = (root / name).read_bytes()
     manifest = json.loads(files["manifest.json"])
-    if manifest["domain"] != DOMAIN or manifest["name"] != "HyundaiJP":
-        raise ValueError("Expected HyundaiJP manifest with hyundai_jp domain")
+    if manifest["domain"] != DOMAIN or manifest["name"] != "Hyundai Bluelink JP":
+        raise ValueError("Expected Hyundai Bluelink JP manifest with hyundai_jp domain")
     for requirement in manifest["requirements"]:
         if "hyundai_kia_connect_api" in requirement.lower().replace("-", "_"):
             raise ValueError(

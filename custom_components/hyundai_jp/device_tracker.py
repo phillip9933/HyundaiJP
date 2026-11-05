@@ -1,4 +1,4 @@
-"""Device Tracker for HyundaiJP integration."""
+"""Device Tracker for Hyundai Bluelink JP integration."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from ._api import Vehicle
 from .const import DOMAIN
 from .coordinator import JapanDataUpdateCoordinator
-from .entity import HyundaiKiaConnectEntity
+from .entity import HyundaiBluelinkEntity
 
 
 async def async_setup_entry(
@@ -27,7 +27,7 @@ async def async_setup_entry(
     for vehicle_id in coordinator.vehicle_manager.vehicles:
         vehicle: Vehicle = coordinator.vehicle_manager.vehicles[vehicle_id]
         if vehicle.location is not None:
-            entities.append(HyundaiKiaConnectTracker(coordinator, vehicle))
+            entities.append(HyundaiBluelinkTracker(coordinator, vehicle))
 
     async_add_entities(entities)
 
@@ -35,7 +35,7 @@ async def async_setup_entry(
 PARALLEL_UPDATES = 0
 
 
-class HyundaiKiaConnectTracker(TrackerEntity, HyundaiKiaConnectEntity):
+class HyundaiBluelinkTracker(TrackerEntity, HyundaiBluelinkEntity):
     """Tracks the vehicle's GPS location."""
 
     def __init__(
@@ -44,7 +44,7 @@ class HyundaiKiaConnectTracker(TrackerEntity, HyundaiKiaConnectEntity):
         vehicle: Vehicle,
     ) -> None:
         """Initialize the tracker."""
-        HyundaiKiaConnectEntity.__init__(self, coordinator, vehicle)
+        HyundaiBluelinkEntity.__init__(self, coordinator, vehicle)
         self._attr_unique_id = f"{DOMAIN}_{vehicle.id}_location"
         self._attr_translation_key = "location"
         self._attr_icon = "mdi:map-marker-outline"

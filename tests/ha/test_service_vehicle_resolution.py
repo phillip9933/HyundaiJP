@@ -141,7 +141,7 @@ async def test_explicit_device_must_belong_to_a_loaded_account_and_current_vehic
         )
     else:
         environment.coordinators["account-a"].config_entry = None
-    with pytest.raises(HomeAssistantError, match="no active HyundaiJP vehicle"):
+    with pytest.raises(HomeAssistantError, match="no active Hyundai Bluelink JP vehicle"):
         await _call(environment, service, {ATTR_DEVICE_ID: "device-a"})
     _assert_no_operations(environment)
     environment.registry.async_get.assert_called_once_with("device-a")
@@ -164,7 +164,7 @@ async def test_ambiguous_explicit_matches_are_rejected(
         else ("vehicle-a", "vehicle-b"),
     )
     environment = _services(monkeypatch, accounts, {"device": device})
-    with pytest.raises(HomeAssistantError, match="multiple active HyundaiJP vehicles"):
+    with pytest.raises(HomeAssistantError, match="multiple active Hyundai Bluelink JP vehicles"):
         await _call(environment, service, {ATTR_DEVICE_ID: "device"})
     _assert_no_operations(environment)
 
@@ -289,7 +289,7 @@ async def test_account_refresh_with_explicit_device_selects_only_its_account(
 )
 async def test_multiple_accounts_require_a_target_for_refresh(monkeypatch, service):
     environment = _services(monkeypatch, {"account-a": ("a",), "account-b": ("b",)})
-    with pytest.raises(HomeAssistantError, match="identify the HyundaiJP account"):
+    with pytest.raises(HomeAssistantError, match="identify the Hyundai Bluelink JP account"):
         await _call(environment, service)
     _assert_no_operations(environment)
 

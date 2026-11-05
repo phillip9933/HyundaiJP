@@ -1,4 +1,4 @@
-"""Switch for HyundaiJP integration."""
+"""Switch for Hyundai Bluelink JP integration."""
 
 from __future__ import annotations
 
@@ -16,12 +16,12 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from ._api import Vehicle
 from .const import DOMAIN
 from .coordinator import JapanDataUpdateCoordinator
-from .entity import HyundaiKiaConnectEntity
+from .entity import HyundaiBluelinkEntity
 
 
 @dataclass(frozen=True, kw_only=True)
 class HyundaiKiaSwitchDescription(SwitchEntityDescription):
-    """Describes a HyundaiJP switch entity."""
+    """Describes a Hyundai Bluelink JP switch entity."""
 
     value_fn: Callable[[Vehicle], bool | None]
     exists_fn: Callable[[Vehicle], bool]
@@ -208,7 +208,7 @@ async def async_setup_entry(
                 continue
             if description.exists_fn(vehicle):
                 entities.append(
-                    HyundaiKiaConnectSwitch(coordinator, description, vehicle)
+                    HyundaiBluelinkSwitch(coordinator, description, vehicle)
                 )
         if vehicle.supports.svm:
             entities.append(SVMDewarpSwitch(coordinator, vehicle))
@@ -219,7 +219,7 @@ async def async_setup_entry(
 PARALLEL_UPDATES = 1
 
 
-class HyundaiKiaConnectSwitch(SwitchEntity, HyundaiKiaConnectEntity):
+class HyundaiBluelinkSwitch(SwitchEntity, HyundaiBluelinkEntity):
     """Switch backed by a vehicle on/off command pair."""
 
     entity_description: HyundaiKiaSwitchDescription
@@ -231,7 +231,7 @@ class HyundaiKiaConnectSwitch(SwitchEntity, HyundaiKiaConnectEntity):
         vehicle: Vehicle,
     ) -> None:
         """Initialize the switch."""
-        HyundaiKiaConnectEntity.__init__(self, coordinator, vehicle)
+        HyundaiBluelinkEntity.__init__(self, coordinator, vehicle)
         self.entity_description = description
         self._attr_unique_id = f"{DOMAIN}_{vehicle.id}_{description.key}"
         self._attr_icon = description.icon
@@ -250,7 +250,7 @@ class HyundaiKiaConnectSwitch(SwitchEntity, HyundaiKiaConnectEntity):
         await self.entity_description.off_fn(self.coordinator, self.vehicle.id)
 
 
-class SVMDewarpSwitch(SwitchEntity, HyundaiKiaConnectEntity, RestoreEntity):
+class SVMDewarpSwitch(SwitchEntity, HyundaiBluelinkEntity, RestoreEntity):
     """Toggle fisheye dewarp on this vehicle's SVM camera views.
 
     Presentation preference, not a vehicle command, so it does not use the
@@ -269,7 +269,7 @@ class SVMDewarpSwitch(SwitchEntity, HyundaiKiaConnectEntity, RestoreEntity):
         vehicle: Vehicle,
     ) -> None:
         """Initialize the SVM dewarp toggle."""
-        HyundaiKiaConnectEntity.__init__(self, coordinator, vehicle)
+        HyundaiBluelinkEntity.__init__(self, coordinator, vehicle)
         self._attr_unique_id = f"{DOMAIN}_{vehicle.id}_svm_dewarp"
 
     @property

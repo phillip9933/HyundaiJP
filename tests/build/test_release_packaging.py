@@ -25,12 +25,12 @@ def repository(tmp_path: Path) -> Path:
         "_api/KiaUvoApiJP.py",
     ):
         (component / name).write_text(f"# exact runtime bytes: {name}\n")
-    (component / "translations/en.json").write_text('{"title": "HyundaiJP"}')
+    (component / "translations/en.json").write_text('{"title": "Hyundai Bluelink JP"}')
     (component / "manifest.json").write_text(
         json.dumps(
             {
                 "domain": "hyundai_jp",
-                "name": "HyundaiJP",
+                "name": "Hyundai Bluelink JP",
                 "version": "0.1.0b1",
                 "requirements": ["requests>=2.32"],
             }

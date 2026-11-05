@@ -1,4 +1,4 @@
-"""Switches for HyundaiJP integration."""
+"""Switches for Hyundai Bluelink JP integration."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from ._api import ClimateRequestOptions, Vehicle
 from .const import DOMAIN
 from .coordinator import JapanDataUpdateCoordinator
-from .entity import HyundaiKiaConnectEntity
+from .entity import HyundaiBluelinkEntity
 
 
 async def async_setup_entry(
@@ -46,8 +46,8 @@ async def async_setup_entry(
 PARALLEL_UPDATES = 1
 
 
-class HyundaiKiaCarClimateControlSwitch(HyundaiKiaConnectEntity, ClimateEntity):
-    """HyundaiJP Car Climate Control."""
+class HyundaiKiaCarClimateControlSwitch(HyundaiBluelinkEntity, ClimateEntity):
+    """Hyundai Bluelink JP Car Climate Control."""
 
     vehicle: Vehicle
 

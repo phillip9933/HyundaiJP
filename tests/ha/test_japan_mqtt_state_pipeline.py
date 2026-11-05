@@ -11,7 +11,7 @@ from homeassistant.core import StateMachine
 from custom_components.hyundai_jp._api import Token, Vehicle
 from custom_components.hyundai_jp._api.japan_mqtt import JapanMqttSession
 from custom_components.hyundai_jp._api.KiaUvoApiJP import KiaUvoApiJP
-from custom_components.hyundai_jp.lock import HyundaiKiaConnectLock
+from custom_components.hyundai_jp.lock import HyundaiBluelinkLock
 from tests.ha.test_region_operation_serialization import coordinator
 
 
@@ -62,7 +62,7 @@ async def test_delayed_unlock_survives_later_unrelated_packet_and_reaches_activi
     result = coordinator()
     result.vehicle_manager.api = api
     result.vehicle_manager.vehicles = {vehicle.id: vehicle}
-    lock = HyundaiKiaConnectLock.__new__(HyundaiKiaConnectLock)
+    lock = HyundaiBluelinkLock.__new__(HyundaiBluelinkLock)
     lock.coordinator = result
     lock.vehicle = vehicle
     bus = Mock()

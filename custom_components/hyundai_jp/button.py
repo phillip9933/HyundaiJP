@@ -1,4 +1,4 @@
-"""Button for HyundaiJP integration."""
+"""Button for Hyundai Bluelink JP integration."""
 
 from __future__ import annotations
 
@@ -14,12 +14,12 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from ._api import Vehicle
 from .const import DOMAIN
 from .coordinator import JapanDataUpdateCoordinator
-from .entity import HyundaiKiaConnectEntity
+from .entity import HyundaiBluelinkEntity
 
 
 @dataclass(frozen=True, kw_only=True)
 class HyundaiKiaButtonDescription(ButtonEntityDescription):
-    """Describes a HyundaiJP button entity."""
+    """Describes a Hyundai Bluelink JP button entity."""
 
     press_action: str
     command: str | None = None
@@ -127,7 +127,7 @@ async def async_setup_entry(
                 continue
             if not description.exists_fn(vehicle):
                 continue
-            entities.append(HyundaiKiaConnectButton(coordinator, description, vehicle))
+            entities.append(HyundaiBluelinkButton(coordinator, description, vehicle))
 
     async_add_entities(entities)
 
@@ -135,7 +135,7 @@ async def async_setup_entry(
 PARALLEL_UPDATES = 1
 
 
-class HyundaiKiaConnectButton(ButtonEntity, HyundaiKiaConnectEntity):
+class HyundaiBluelinkButton(ButtonEntity, HyundaiBluelinkEntity):
     """Button that triggers a vehicle command on press."""
 
     def __init__(
@@ -145,7 +145,7 @@ class HyundaiKiaConnectButton(ButtonEntity, HyundaiKiaConnectEntity):
         vehicle: Vehicle,
     ) -> None:
         """Initialize the button."""
-        HyundaiKiaConnectEntity.__init__(self, coordinator, vehicle)
+        HyundaiBluelinkEntity.__init__(self, coordinator, vehicle)
         self.entity_description: HyundaiKiaButtonDescription = description
         self._key = description.key
         self._attr_unique_id = f"{DOMAIN}_{vehicle.id}_{self._key}"

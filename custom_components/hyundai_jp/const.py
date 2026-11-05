@@ -1,4 +1,4 @@
-"""Constants for the HyundaiJP integration."""
+"""Constants for the Hyundai Bluelink JP integration."""
 
 from enum import StrEnum
 

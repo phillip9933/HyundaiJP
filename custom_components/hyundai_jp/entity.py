@@ -1,4 +1,4 @@
-"""Base Entity for HyundaiJP integration."""
+"""Base Entity for Hyundai Bluelink JP integration."""
 
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -8,8 +8,8 @@ from .const import DOMAIN
 from .coordinator import JapanDataUpdateCoordinator
 
 
-class HyundaiKiaConnectEntity(CoordinatorEntity[JapanDataUpdateCoordinator]):
-    """Class for base entity for HyundaiJP integration."""
+class HyundaiBluelinkEntity(CoordinatorEntity[JapanDataUpdateCoordinator]):
+    """Class for base entity for Hyundai Bluelink JP integration."""
 
     _attr_has_entity_name = True
 

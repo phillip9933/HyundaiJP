@@ -1,9 +1,9 @@
 {
-  "title": "HyundaiJP",
+  "title": "Hyundai Bluelink JP",
   "config": {
     "step": {
       "user": {
-        "title": "HyundaiJP",
+        "title": "Hyundai Bluelink JP",
         "description": "Enter your Hyundai Japan Bluelink account and the PIN used for vehicle commands.",
         "data": {
           "username": "Username",
@@ -12,17 +12,17 @@
         }
       },
       "reauth_confirm": {
-        "title": "HyundaiJP - Reauthentication",
+        "title": "Hyundai Bluelink JP - Reauthentication",
         "description": "Your account is unable to authenticate. Click Submit to re-setup."
       },
       "reconfigure": {
-        "title": "HyundaiJP - Reconfigure",
+        "title": "Hyundai Bluelink JP - Reconfigure",
         "data": {
           "reconfigure_choice": "What would you like to do?"
         }
       },
       "reconfigure_pin": {
-        "title": "HyundaiJP - Set PIN",
+        "title": "Hyundai Bluelink JP - Set PIN",
         "description": "Enter the PIN required to authorize remote commands (lock, unlock, climate) in the Bluelink app.",
         "data": {
           "pin": "PIN"
@@ -43,7 +43,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "HyundaiJP",
+        "title": "Hyundai Bluelink JP",
         "data": {
           "scan_interval": "Scan Interval (min)",
           "force_refresh": "Force Refresh Interval (min), use caution setting this too low as it consumes 12v battery",

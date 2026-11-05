@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 from custom_components.hyundai_jp._api import Vehicle
 from custom_components.hyundai_jp.const import DOMAIN
-from custom_components.hyundai_jp.entity import HyundaiKiaConnectEntity
+from custom_components.hyundai_jp.entity import HyundaiBluelinkEntity
 
 
 def _vehicle(vehicle_id: str = "backend-id") -> Vehicle:
@@ -19,8 +19,8 @@ def test_vin_keeps_device_identity_when_backend_id_changes() -> None:
     coordinator.vehicle_manager.brand = 1
     coordinator.vehicle_manager.region = 1
 
-    before = HyundaiKiaConnectEntity(coordinator, _vehicle("old-id")).device_info
-    after = HyundaiKiaConnectEntity(coordinator, _vehicle("new-id")).device_info
+    before = HyundaiBluelinkEntity(coordinator, _vehicle("old-id")).device_info
+    after = HyundaiBluelinkEntity(coordinator, _vehicle("new-id")).device_info
 
     assert (DOMAIN, "vin:KMH12345678901234") in before["identifiers"]
     assert before["identifiers"] & after["identifiers"]

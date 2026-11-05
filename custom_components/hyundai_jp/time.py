@@ -1,4 +1,4 @@
-"""Time entities for HyundaiJP integration."""
+"""Time entities for Hyundai Bluelink JP integration."""
 
 from __future__ import annotations
 
@@ -15,12 +15,12 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from ._api import Vehicle
 from .const import DOMAIN
 from .coordinator import JapanDataUpdateCoordinator
-from .entity import HyundaiKiaConnectEntity
+from .entity import HyundaiBluelinkEntity
 
 
 @dataclass(frozen=True, kw_only=True)
 class HyundaiKiaTimeDescription(TimeEntityDescription):
-    """Describes a HyundaiJP time entity."""
+    """Describes a Hyundai Bluelink JP time entity."""
 
     value_fn: Callable[[Vehicle], dt.time | None]
     exists_fn: Callable[[Vehicle], bool]
@@ -67,7 +67,7 @@ async def async_setup_entry(
         for description in TIME_DESCRIPTIONS:
             if description.exists_fn(vehicle):
                 entities.append(
-                    HyundaiKiaConnectTimeEntity(coordinator, description, vehicle)
+                    HyundaiBluelinkTimeEntity(coordinator, description, vehicle)
                 )
 
     async_add_entities(entities)
@@ -76,7 +76,7 @@ async def async_setup_entry(
 PARALLEL_UPDATES = 1
 
 
-class HyundaiKiaConnectTimeEntity(TimeEntity, HyundaiKiaConnectEntity):
+class HyundaiBluelinkTimeEntity(TimeEntity, HyundaiBluelinkEntity):
     """Off-peak charging start or end time."""
 
     entity_description: HyundaiKiaTimeDescription
@@ -88,7 +88,7 @@ class HyundaiKiaConnectTimeEntity(TimeEntity, HyundaiKiaConnectEntity):
         vehicle: Vehicle,
     ) -> None:
         """Initialize the time entity."""
-        HyundaiKiaConnectEntity.__init__(self, coordinator, vehicle)
+        HyundaiBluelinkEntity.__init__(self, coordinator, vehicle)
         self.entity_description = description
         self._attr_unique_id = f"{DOMAIN}_{vehicle.id}_{description.key}"
         self._attr_icon = description.icon

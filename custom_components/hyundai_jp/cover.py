@@ -1,4 +1,4 @@
-"""Cover for HyundaiJP integration."""
+"""Cover for Hyundai Bluelink JP integration."""
 
 from __future__ import annotations
 
@@ -20,12 +20,12 @@ from ._api import Vehicle, WindowRequestOptions
 from ._api.const import WINDOW_STATE
 from .const import DOMAIN
 from .coordinator import JapanDataUpdateCoordinator
-from .entity import HyundaiKiaConnectEntity
+from .entity import HyundaiBluelinkEntity
 
 
 @dataclass(frozen=True, kw_only=True)
 class HyundaiKiaCoverDescription(CoverEntityDescription):
-    """Describes a HyundaiJP window cover entity."""
+    """Describes a Hyundai Bluelink JP window cover entity."""
 
     window_position: str
 
@@ -78,9 +78,7 @@ async def async_setup_entry(
             if positions is not None and description.window_position not in positions:
                 continue
             if getattr(vehicle, description.key, None) is not None:
-                entities.append(
-                    HyundaiKiaConnectCover(coordinator, description, vehicle)
-                )
+                entities.append(HyundaiBluelinkCover(coordinator, description, vehicle))
 
     async_add_entities(entities)
 
@@ -88,7 +86,7 @@ async def async_setup_entry(
 PARALLEL_UPDATES = 1
 
 
-class HyundaiKiaConnectCover(CoverEntity, HyundaiKiaConnectEntity):
+class HyundaiBluelinkCover(CoverEntity, HyundaiBluelinkEntity):
     """A vehicle window exposed as a cover."""
 
     _attr_supported_features = (
@@ -106,7 +104,7 @@ class HyundaiKiaConnectCover(CoverEntity, HyundaiKiaConnectEntity):
         vehicle: Vehicle,
     ) -> None:
         """Initialize the window cover."""
-        HyundaiKiaConnectEntity.__init__(self, coordinator, vehicle)
+        HyundaiBluelinkEntity.__init__(self, coordinator, vehicle)
         self.entity_description: HyundaiKiaCoverDescription = description
         self._attr_unique_id = f"{DOMAIN}_{vehicle.id}_{description.key}"
 

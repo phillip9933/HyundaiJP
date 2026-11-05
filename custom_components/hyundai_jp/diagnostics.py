@@ -1,6 +1,6 @@
-"""Diagnostics support for HyundaiJP.
+"""Diagnostics support for Hyundai Bluelink JP.
 
-Downloadable from Settings > Devices & Services > HyundaiJP > (menu) > Download
+Downloadable from Settings > Devices & Services > Hyundai Bluelink JP > (menu) > Download
 diagnostics. Returns a redacted snapshot of the account's cached state —
 parsed Vehicle data, API class, versions, and curated token metadata — with
 no fresh API calls (the car is not woken). Users attach this JSON to bug
@@ -108,7 +108,7 @@ async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> dict[str, Any]:
     """Return a redacted diagnostics snapshot for this config entry."""
-    # HyundaiJP stores its coordinator under config_entry.unique_id (see
+    # Hyundai Bluelink JP stores its coordinator under config_entry.unique_id (see
     # __init__.py async_setup_entry), not entry_id.
     coordinator: JapanDataUpdateCoordinator = hass.data[DOMAIN][entry.unique_id]
     vm = coordinator.vehicle_manager

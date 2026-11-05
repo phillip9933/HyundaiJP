@@ -1,4 +1,4 @@
-"""The HyundaiJP integration."""
+"""The Hyundai Bluelink JP integration."""
 
 import logging
 
@@ -33,7 +33,7 @@ PLATFORMS: list[str] = [
 
 
 async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
-    """Set up HyundaiJP from a config entry."""
+    """Set up Hyundai Bluelink JP from a config entry."""
     coordinator = JapanDataUpdateCoordinator(hass, config_entry)
     try:
         await coordinator.async_config_entry_first_refresh()

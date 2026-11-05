@@ -39,7 +39,7 @@ def publish(version: str, prerelease: bool, commit: str, output: Path) -> None:
     archive = build(ROOT, output, version)
     notes = output / "release-notes.md"
     notes.write_text(
-        f"HyundaiJP {version}\n\n"
+        f"Hyundai Bluelink JP {version}\n\n"
         "Install or update through HACS. The Japan API is included.\n\n"
         "Download hyundai_jp.zip for a manual installation. "
         "The SHA-256 checksum is attached.\n"

@@ -1,4 +1,4 @@
-"""HyundaiJP setup uses only Japan account credentials."""
+"""Hyundai Bluelink JP setup uses only Japan account credentials."""
 
 import hashlib
 from types import SimpleNamespace
@@ -64,7 +64,7 @@ async def test_login_fixes_japan_and_hyundai_and_releases_temporary_manager(
         "pin": "1234",
     }
     data = flow.async_create_entry.call_args.kwargs
-    assert data["title"] == "HyundaiJP Synthetic"
+    assert data["title"] == "Hyundai Bluelink JP Synthetic"
     assert "region" not in data["data"]
     assert "brand" not in data["data"]
     manager.login.assert_called_once()

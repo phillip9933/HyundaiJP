@@ -1,4 +1,4 @@
-"""Sensor for HyundaiJP integration."""
+"""Sensor for Hyundai Bluelink JP integration."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ from ._api import Vehicle
 from ._api.const import ENGINE_TYPES
 from .const import CHARGING_CURRENTS, DOMAIN, DYNAMIC_UNIT
 from .coordinator import JapanDataUpdateCoordinator
-from .entity import HyundaiKiaConnectEntity
+from .entity import HyundaiBluelinkEntity
 
 
 @dataclass(frozen=True)
@@ -678,7 +678,7 @@ async def async_setup_entry(
             )
             if create:
                 entities.append(
-                    HyundaiKiaConnectSensor(coordinator, description, vehicle)
+                    HyundaiBluelinkSensor(coordinator, description, vehicle)
                 )
         if vehicle.daily_stats:
             entities.append(
@@ -707,8 +707,8 @@ async def async_setup_entry(
 PARALLEL_UPDATES = 0
 
 
-class HyundaiKiaConnectSensor(RestoreSensor, SensorEntity, HyundaiKiaConnectEntity):
-    """HyundaiJP sensor class."""
+class HyundaiBluelinkSensor(RestoreSensor, SensorEntity, HyundaiBluelinkEntity):
+    """Hyundai Bluelink JP sensor class."""
 
     entity_description: HyundaiKiaSensorEntityDescription
 
@@ -790,7 +790,7 @@ class HyundaiKiaConnectSensor(RestoreSensor, SensorEntity, HyundaiKiaConnectEnti
         return {}
 
 
-class VehicleEntity(SensorEntity, HyundaiKiaConnectEntity):
+class VehicleEntity(SensorEntity, HyundaiBluelinkEntity):
     """Sensor exposing the raw vehicle data as attributes."""
 
     _attr_translation_key = "data"
@@ -827,7 +827,7 @@ class VehicleEntity(SensorEntity, HyundaiKiaConnectEntity):
         return f"{DOMAIN}-all-data-{self.vehicle.id}"
 
 
-class DailyDrivingStatsEntity(SensorEntity, HyundaiKiaConnectEntity):
+class DailyDrivingStatsEntity(SensorEntity, HyundaiBluelinkEntity):
     """Number of days of driving stats, with each day as an attribute."""
 
     _attr_translation_key = "daily_driving_stats"
@@ -876,7 +876,7 @@ class DailyDrivingStatsEntity(SensorEntity, HyundaiKiaConnectEntity):
         return UnitOfTime.DAYS
 
 
-class TodaysDailyDrivingStatsEntity(SensorEntity, HyundaiKiaConnectEntity):
+class TodaysDailyDrivingStatsEntity(SensorEntity, HyundaiBluelinkEntity):
     """Today's driving stats, zeroed until the API reports today."""
 
     _attr_translation_key = "todays_daily_driving_stats"
@@ -936,7 +936,7 @@ class TodaysDailyDrivingStatsEntity(SensorEntity, HyundaiKiaConnectEntity):
         return f"{DOMAIN}-todays-daily-driving-stats-{self.vehicle.id}"
 
 
-class SVMStatusSensor(SensorEntity, HyundaiKiaConnectEntity):
+class SVMStatusSensor(SensorEntity, HyundaiBluelinkEntity):
     """SVM capture metadata sensor (companion to the SVM image entity).
 
     The image entity cannot expose extra state attributes (ImageEntity

@@ -1,4 +1,4 @@
-"""Config flow for HyundaiJP integration."""
+"""Config flow for Hyundai Bluelink JP integration."""
 
 from __future__ import annotations
 
@@ -114,8 +114,8 @@ async def validate_input(
         raise InvalidAuth from err
 
 
-class HyundaiKiaConnectOptionFlowHandler(config_entries.OptionsFlowWithReload):
-    """Handle an option flow for HyundaiJP."""
+class HyundaiBluelinkOptionFlowHandler(config_entries.OptionsFlowWithReload):
+    """Handle an option flow for Hyundai Bluelink JP."""
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -135,7 +135,7 @@ class HyundaiKiaConnectOptionFlowHandler(config_entries.OptionsFlowWithReload):
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for HyundaiJP."""
+    """Handle a config flow for Hyundai Bluelink JP."""
 
     VERSION = 1
     reauth_entry: ConfigEntry | None = None
@@ -148,9 +148,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(
         config_entry: ConfigEntry,
-    ) -> HyundaiKiaConnectOptionFlowHandler:
+    ) -> HyundaiBluelinkOptionFlowHandler:
         """Initiate options flow instance."""
-        return HyundaiKiaConnectOptionFlowHandler()
+        return HyundaiBluelinkOptionFlowHandler()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -188,7 +188,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             data_updates=full_config,
                             reason="reauth_successful",
                         )
-                    title = f"HyundaiJP {user_input[CONF_USERNAME]}"
+                    title = f"Hyundai Bluelink JP {user_input[CONF_USERNAME]}"
                     await self.async_set_unique_id(
                         hashlib.sha256(
                             user_input[CONF_USERNAME].strip().casefold().encode("utf-8")

@@ -1,4 +1,4 @@
-# HyundaiJP
+# Hyundai Bluelink JP
 
 Japan-only Hyundai Bluelink integration for Home Assistant, maintained separately
 from the multi-region project. The Japan API is included and released with the
@@ -11,23 +11,26 @@ Availability depends on the vehicle and its Bluelink subscription. Commands can
 take a while, as they do in the Bluelink app; avoid pressing repeatedly while a
 command is still running.
 
+Previously called **HyundaiJP**. Updates keep your existing account, entities,
+services and automations; the repository URL and `hyundai_jp` domain stay the same.
+
 ## Install with HACS
 
 Requires Home Assistant 2026.9.2 or newer and HACS.
 
 1. Make a Home Assistant backup. Keep the existing Hyundai / Kia Connect
    integration installed for rollback, but **disable its config entry** before
-   setting up HyundaiJP so both integrations do not poll the same car.
+   setting up Hyundai Bluelink JP so both integrations do not poll the same car.
 2. Open **HACS → ⋮ → Custom repositories**. Add
    `https://github.com/phillip9933/HyundaiJP` and choose **Integration**.
-3. Find **HyundaiJP** in HACS and download the latest numbered release
+3. Find **Hyundai Bluelink JP** in HACS and download the latest numbered release
    (`v0.1.0` or newer). For optional beta releases, enable **Show beta versions**
    in its HACS menu, then select the beta version in **Download / Redownload**.
 4. Restart Home Assistant.
 5. Open **Settings → Devices & services → Add integration**, search for
-   **HyundaiJP**, and enter your Japan Bluelink username, password and PIN.
+   **Hyundai Bluelink JP**, and enter your Japan Bluelink username, password and PIN.
 
-HyundaiJP uses its own `hyundai_jp` domain. This is a one-time new setup; it does
+Hyundai Bluelink JP uses its own `hyundai_jp` domain. This is a one-time new setup; it does
 not import or overwrite the old integration's account, entity registry or
 automations. Check entity names before moving dashboard cards or automations to
 the new integration. Do not remove the old entry until you are happy with the new
@@ -53,12 +56,12 @@ to capture, then open the SVM image entities. Add them to a dashboard if you wan
 the images visible there.
 
 For troubleshooting, download diagnostics from **Settings → Devices & services
-→ HyundaiJP → your vehicle → Download diagnostics**. Review the file before
+→ Hyundai Bluelink JP → your vehicle → Download diagnostics**. Review the file before
 sharing it. Do not post account credentials, PINs or unredacted vehicle data.
 
-To return to the old build, disable HyundaiJP and re-enable the old Hyundai / Kia
+To return to the old build, disable Hyundai Bluelink JP and re-enable the old Hyundai / Kia
 Connect entry. Its repo, files and existing releases are unchanged. Within
-HyundaiJP, HACS **Redownload** also lets you select an earlier published version;
+Hyundai Bluelink JP, HACS **Redownload** also lets you select an earlier published version;
 restart after changing versions.
 
 ## Development and releases
@@ -81,7 +84,7 @@ See [the workflows](.github/workflows) for exact checks and release steps.
 
 ## Credits
 
-The HyundaiJP icon is maintained as [an SVG](custom_components/hyundai_jp/brand/icon.svg).
+The Hyundai Bluelink JP icon is maintained as [an SVG](custom_components/hyundai_jp/brand/icon.svg).
 The 256px and 512px PNG icons are rendered from that source for Home Assistant.
 Its Hyundai emblem comes from [Simple Icons](https://github.com/simple-icons/simple-icons/blob/develop/icons/hyundai.svg)
 under [CC0](https://github.com/simple-icons/simple-icons/blob/develop/LICENSE.md).
