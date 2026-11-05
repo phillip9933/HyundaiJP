@@ -48,6 +48,24 @@ release asset. This happened when only the first beta release was available.
 [HACS custom repo instructions](https://hacs.xyz/docs/faq/custom_repositories/)
 · [HACS downloads and version selection](https://hacs.xyz/docs/use/repositories/dashboard/)
 
+## Actions and settings
+
+Schedule controls change only the requested setting. In service calls, leave
+unrelated fields out to preserve them. The departure switches affect their own
+slot; the service's top-level climate settings deliberately apply to both slots.
+Window services can target only the supported windows you want to change.
+
+Actions reject missing or invalid settings before sending a command. If a
+multi-part schedule write reports partial acceptance, check Bluelink before
+trying again: an earlier part may already have been accepted. Commands are not
+automatically replayed. A failed force refresh reports an error rather than
+treating cached status as confirmation of a fresh update.
+
+Location, history and address lookup are optional. Temporary failures retain
+the last available values while valid core vehicle status continues to update.
+Reauthentication and reconfiguration keep the same account; add a separate
+integration entry to use a different account.
+
 ## Test and roll back
 
 Start by checking vehicle status against Bluelink. Then try one command at a time
