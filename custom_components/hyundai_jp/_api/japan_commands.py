@@ -33,8 +33,10 @@ from .const import (
 )
 from .exceptions import (
     AuthenticationError,
+    BluelinkError,
     InvalidAPIResponseError,
     PartialCommandError,
+    RateLimitingError,
     RequestTimeoutError,
     UnsupportedControlError,
 )
@@ -183,10 +185,23 @@ class JapanCommandsMixin:
             category = "invalid_input"
         diagnostic = self._japan_command_diagnostics
         diagnostic["failed_stage"] = diagnostic.get("stage", "unknown")
+        if isinstance(error, BluelinkError):
+            error.action_submitted = diagnostic["failed_stage"] in {
+                "http_submitting",
+                "http_submitted",
+                "accepted",
+            }
         diagnostic["stage"] = (
             "submission_unknown"
-            if isinstance(error, RequestTimeoutError)
-            and diagnostic["failed_stage"] == "http_submitting"
+            if diagnostic["failed_stage"] == "http_submitting"
+            and (
+                isinstance(error, RequestTimeoutError)
+                or not isinstance(
+                    error,
+                    (AuthenticationError, RateLimitingError, UnsupportedControlError),
+                )
+                and not (isinstance(error, BluelinkError) and error.request_rejected)
+            )
             else "failed"
         )
         diagnostic["failure_category"] = category

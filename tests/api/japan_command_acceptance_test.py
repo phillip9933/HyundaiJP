@@ -136,10 +136,16 @@ def test_http_and_vendor_errors_never_create_acceptance_receipts(
         response({"controlToken": "synthetic-control", "expiresTime": 60}),
         response(body, status),
     ]
-    with pytest.raises(error):
+    with pytest.raises(error) as caught:
         api.lock_action(token, vehicle, VEHICLE_LOCK_ACTION.UNLOCK)
     assert getattr(api, "_japan_actions", {}) == {}
-    assert api._japan_command_diagnostics["stage"] == "failed"
+    assert api._japan_command_diagnostics["stage"] == (
+        "submission_unknown"
+        if status >= 500 or not isinstance(body, dict)
+        else "failed"
+    )
+    assert caught.value.action_submitted is True
+    assert caught.value.request_rejected is (status < 500 and isinstance(body, dict))
     assert "SYNTHETIC_PRIVATE" not in json.dumps(api._japan_command_diagnostics)
     helper.track.assert_not_called()
     helper.close.assert_not_called()

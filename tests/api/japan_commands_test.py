@@ -691,7 +691,10 @@ def test_command_diagnostics_preserve_sanitized_failure_stage(failure_at, expect
             api.helper.status.side_effect = error
             api.check_action_status(token, vehicle, action)
     diagnostic = api._japan_command_diagnostics
-    assert diagnostic["stage"] == "failed"
+    assert diagnostic["stage"] == (
+        "submission_unknown" if failure_at == "http" else "failed"
+    )
+    assert error.action_submitted is (failure_at == "http")
     assert diagnostic["failed_stage"] == expected
     assert diagnostic["failure_category"] == "invalid_response"
     assert "private-token-and-location" not in json.dumps(diagnostic)

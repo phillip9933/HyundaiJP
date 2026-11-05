@@ -6,6 +6,9 @@ class BluelinkError(Exception):
     Base exception for Japan Bluelink failures.
     """
 
+    request_rejected = False
+    action_submitted: bool | None = None
+
 
 class AuthenticationError(BluelinkError):
     """

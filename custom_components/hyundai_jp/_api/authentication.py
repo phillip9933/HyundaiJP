@@ -13,6 +13,7 @@ import requests
 from .exceptions import (
     APIError,
     AuthenticationError,
+    BluelinkError,
     ConsentRequiredError,
     DuplicateRequestError,
     InvalidAPIResponseError,
@@ -41,7 +42,7 @@ class JapanAuthClient:
 
     BASIC_AUTHORIZATION = "Basic ZTA4NGMwZTQtZmNmZS00N2UzLTk5YzktMzZlYjkzNTkzNzM3OjFZcWV4dng3TWxiS3c2YUFvYk1FbDJqQVFvQTBtUVhyV1E1SWpIT083TzRZRHRkRw=="
 
-    _KNOWN_ERRORS: ClassVar[dict[str, tuple[type[Exception], str]]] = {
+    _KNOWN_ERRORS: ClassVar[dict[str, tuple[type[BluelinkError], str]]] = {
         "4002": (APIError, "invalid request"),
         "4003": (APIError, "invalid value"),
         "4004": (DuplicateRequestError, "duplicate request"),
@@ -133,14 +134,22 @@ class JapanAuthClient:
             result = {}
         diagnostic = self._diagnostic(status, result)
         if status in (401, 403):
-            raise AuthenticationError("Japan authentication was rejected" + diagnostic)
+            rejection: BluelinkError = AuthenticationError(
+                "Japan authentication was rejected" + diagnostic
+            )
+            rejection.request_rejected = True
+            raise rejection
         if status == 429:
-            raise RateLimitingError("Japan API rate limit reached" + diagnostic)
+            rejection = RateLimitingError("Japan API rate limit reached" + diagnostic)
+            rejection.request_rejected = True
+            raise rejection
         if status >= 500:
             raise ServiceTemporaryUnavailable("Japan API is unavailable" + diagnostic)
         self._check_errors(result, http_status=status, path=path)
         if not 200 <= status < 300:
-            raise APIError("Japan API request was rejected" + diagnostic)
+            error = APIError("Japan API request was rejected" + diagnostic)
+            error.request_rejected = 400 <= status < 500 and status != 408
+            raise error
         return result
 
     @classmethod
@@ -163,14 +172,18 @@ class JapanAuthClient:
             raise AuthenticationError("Japan token grant was rejected" + diagnostic)
         known = cls._KNOWN_ERRORS.get(code)
         if known is not None:
-            raise known[0]("Japan API rejected the request" + diagnostic)
+            error = known[0]("Japan API rejected the request" + diagnostic)
+            error.request_rejected = http_status != 408
+            raise error
         failure_marker = result.get("retCode", result.get("resultType"))
         if (
             (isinstance(failure_marker, str) and failure_marker.upper() == "F")
             or (code and code != "0000")
             or result.get("error")
         ):
-            raise APIError("Japan API rejected the request" + diagnostic)
+            error = APIError("Japan API rejected the request" + diagnostic)
+            error.request_rejected = http_status != 408
+            raise error
 
     @staticmethod
     def _payload(result: dict[str, Any]) -> dict[str, Any]:
