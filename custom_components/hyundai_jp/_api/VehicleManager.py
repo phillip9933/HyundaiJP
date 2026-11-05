@@ -221,6 +221,12 @@ class VehicleManager:
             self.initialize_vehicles()
         return False
 
+    def validate_climate_options(
+        self, vehicle_id: str, options: ClimateRequestOptions
+    ) -> None:
+        """Preflight a restart before sending its separate stop command."""
+        self.api.build_climate_payload(self.get_vehicle(vehicle_id), options)
+
     def start_climate(
         self, vehicle_id: str, options: ClimateRequestOptions
     ) -> str | None:

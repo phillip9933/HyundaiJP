@@ -826,10 +826,10 @@ class JapanCommandsMixin:
             "timeSection": int(value >= dt.time(12)),
         }
 
-    def start_climate(
-        self, token: Token, vehicle: Vehicle, options: ClimateRequestOptions
-    ) -> str:
-        """Construct the supported numeric Celsius Japan climate envelope."""
+    def build_climate_payload(
+        self, vehicle: Vehicle, options: ClimateRequestOptions
+    ) -> dict[str, Any]:
+        """Validate and construct a climate envelope without I/O or state writes."""
         profile = self._japan_profile_section(vehicle, "option")
         hvac_type = (
             options.hvac_temp_type
@@ -978,6 +978,13 @@ class JapanCommandsMixin:
             or options.side_rear_mirror_heating is not None
         ):
             raise UnsupportedControlError("Japan separate heater capability is absent")
+        return payload
+
+    def start_climate(
+        self, token: Token, vehicle: Vehicle, options: ClimateRequestOptions
+    ) -> str:
+        """Submit the supported numeric Celsius Japan climate envelope."""
+        payload = self.build_climate_payload(vehicle, options)
         return self._japan_command(token, vehicle, "control/temperature", payload)
 
     def set_charge_limits(
