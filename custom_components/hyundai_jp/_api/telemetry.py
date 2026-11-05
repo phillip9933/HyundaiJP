@@ -439,6 +439,24 @@ class JapanTelemetry:
     def _update_vehicle_properties_ccs2(
         self, vehicle: Vehicle, state: dict[str, Any]
     ) -> None:
+        """Apply status sections in decoder order; publish raw state last."""
+        self._parse_ccs2_core(vehicle, state)
+        self._parse_ccs2_cabin(vehicle, state)
+        self._parse_ccs2_lights(vehicle, state)
+        self._parse_ccs2_openings(vehicle, state)
+        self._parse_ccs2_tires(vehicle, state)
+        self._parse_ccs2_power_and_alerts(vehicle, state)
+        self._parse_ccs2_battery(vehicle, state)
+        self._parse_ccs2_range_and_charging(vehicle, state)
+        self._parse_ccs2_off_peak(vehicle, state)
+        self._parse_ccs2_departures(vehicle, state)
+        self._parse_ccs2_departure_climate(vehicle, state)
+        self._parse_ccs2_operating_state(vehicle, state)
+        self._parse_ccs2_location(vehicle, state)
+        vehicle.data = state
+
+    def _parse_ccs2_core(self, vehicle: Vehicle, state: dict[str, Any]) -> None:
+        """Snapshot time, odometer, auxiliary battery and driving-ready state."""
         if get_child_value(state, "Date"):
             # CCS2 'Date' is always in UTC, convert to the region timezone.
             # Always use a named timezone to ensure DST adjustment.
@@ -462,6 +480,8 @@ class JapanTelemetry:
 
         vehicle.engine_is_running = get_child_value(state, "DrivingReady")
 
+    def _parse_ccs2_cabin(self, vehicle: Vehicle, state: dict[str, Any]) -> None:
+        """Cabin temperatures, heaters, defrost and seat climate."""
         air_temp = get_child_value(
             state,
             "Cabin.HVAC.Row1.Driver.Temperature.Value",
@@ -522,6 +542,8 @@ class JapanTelemetry:
             get_child_value(state, "Cabin.Seat.Row2.Right.Climate.State")
         )
 
+    def _parse_ccs2_lights(self, vehicle: Vehicle, state: dict[str, Any]) -> None:
+        """Exterior lighting warnings."""
         vehicle.headlamp_status = get_child_value(
             state, "Body.Lights.Front.HeadLamp.SystemWarning"
         )
@@ -556,6 +578,8 @@ class JapanTelemetry:
             state, "Body.Lights.Rear.Right.TurnSignal.Warning"
         )
 
+    def _parse_ccs2_openings(self, vehicle: Vehicle, state: dict[str, Any]) -> None:
+        """Door locks and body openings."""
         vehicle.front_left_door_is_open = get_child_value(
             state, "Cabin.Door.Row1.Driver.Open"
         )
@@ -621,6 +645,9 @@ class JapanTelemetry:
         vehicle.sunroof_is_open = flag_or_none(
             get_child_value(state, "Body.Sunroof.Glass.Open")
         )
+
+    def _parse_ccs2_tires(self, vehicle: Vehicle, state: dict[str, Any]) -> None:
+        """Tire warnings and profile-scaled pressure readings."""
         vehicle.tire_pressure_rear_left_warning_is_on = bool(
             get_child_value(state, "Chassis.Axle.Row2.Left.Tire.PressureLow")
         )
@@ -693,6 +720,11 @@ class JapanTelemetry:
         vehicle.tire_pressure_rear_right = (
             round(_prr * _scale, 1) if _prr is not None and _scale is not None else None
         )
+
+    def _parse_ccs2_power_and_alerts(
+        self, vehicle: Vehicle, state: dict[str, Any]
+    ) -> None:
+        """Driving mode, power supply and system warnings."""
         # Drive mode (e.g. "Eco", "Sport", "Comfort", "Snow", "Smart").
         vehicle.drive_mode = get_child_value(state, "Chassis.DrivingMode.State")
         # Low oil level warning (HEV/ICE). None when unreported (no sensor -> no
@@ -718,6 +750,8 @@ class JapanTelemetry:
         )
         vehicle.trunk_is_open = get_child_value(state, "Body.Trunk.Open")
 
+    def _parse_ccs2_battery(self, vehicle: Vehicle, state: dict[str, Any]) -> None:
+        """Traction battery, conditioning, connector and charge-door state."""
         vehicle.ev_battery_percentage = get_child_value(
             state, "Green.BatteryManagement.BatteryRemain.Ratio"
         )
@@ -824,6 +858,10 @@ class JapanTelemetry:
         elif charging_door_state == 1:
             vehicle.ev_charge_port_door_is_open = True
 
+    def _parse_ccs2_range_and_charging(
+        self, vehicle: Vehicle, state: dict[str, Any]
+    ) -> None:
+        """Driving ranges, charging durations, targets and energy readings."""
         vehicle.total_driving_range = (
             float(
                 get_child_value(
@@ -931,6 +969,8 @@ class JapanTelemetry:
             state, "Green.PowerConsumption.Moment.ClimateAirConditioning"
         )
 
+    def _parse_ccs2_off_peak(self, vehicle: Vehicle, state: dict[str, Any]) -> None:
+        """Off-peak mode and window, preserving unconfigured sentinels."""
         # Green.Reservation.OffPeakTime — off-peak charging window + priority mode.
         # Mode 0 = off, 2 = target-priority (off-peak tariffs prioritized),
         # 3 = time-priority (charge only during off-peak). 1 is reserved/unused.
@@ -965,6 +1005,9 @@ class JapanTelemetry:
                 vehicle.ev_off_peak_charge_only_enabled = True
             elif mode is not None:
                 _LOGGER.warning("%s - unknown CCS2 OffPeakTime.Mode: %s", DOMAIN, mode)
+
+    def _parse_ccs2_departures(self, vehicle: Vehicle, state: dict[str, Any]) -> None:
+        """Departure days and local times."""
         # off_peak is None/falsy -> no OffPeakTime block (HEV/unconfigured) ->
         # ev_off_peak_* and ev_schedule_charge_enabled stay None (None default).
 
@@ -1004,6 +1047,10 @@ class JapanTelemetry:
                 if schedule2.get(k) == 1
             ] or None
 
+    def _parse_ccs2_departure_climate(
+        self, vehicle: Vehicle, state: dict[str, Any]
+    ) -> None:
+        """Per-slot climate settings with the documented fallback unit."""
         # Departure climate: Green.Reservation.Departure.Climate (Schedule 1)
         # and Green.Reservation.Departure.Schedule2.Climate
         climate1 = get_child_value(
@@ -1067,6 +1114,10 @@ class JapanTelemetry:
             if temp is not None:
                 vehicle.ev_second_departure_climate_temperature = temp
 
+    def _parse_ccs2_operating_state(
+        self, vehicle: Vehicle, state: dict[str, Any]
+    ) -> None:
+        """Fluid, fuel, blower and charging activity state."""
         vehicle.washer_fluid_warning_is_on = get_child_value(
             state, "Body.Windshield.Front.WasherFluid.LevelLow"
         )
@@ -1090,6 +1141,8 @@ class JapanTelemetry:
             elif vehicle._ev_estimated_current_charge_duration > 0:
                 vehicle.ev_battery_is_charging = True
 
+    def _parse_ccs2_location(self, vehicle: Vehicle, state: dict[str, Any]) -> None:
+        """Location coordinates and the optional location timestamp."""
         if get_child_value(state, "Location.GeoCoord.Latitude"):
             # Missing Location.TimeStamp must surface as None (HA "unknown")
             # rather than a 2000-01-01 sentinel that renders as "27 years ago".
@@ -1113,5 +1166,3 @@ class JapanTelemetry:
                 get_child_value(state, "Location.GeoCoord.Longitude"),
                 location_last_updated_at,
             )
-
-        vehicle.data = state
