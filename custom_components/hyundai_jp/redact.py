@@ -42,6 +42,7 @@ _SENSITIVE_EXACT = frozenset(
         "clientid",
         "mqttclientid",
         "mqttvehicleid",
+        "vehicleid",
         "huclientid",
         "registrationuuid",
         "mqttregistrationuuid",

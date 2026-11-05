@@ -94,12 +94,16 @@ def _vehicles_payload(
 ) -> list[dict[str, Any]]:
     vm = coordinator.vehicle_manager
     vehicles: list[dict[str, Any]] = []
-    for vehicle_id, vehicle in vm.vehicles.items():
+    for index, vehicle in enumerate(vm.vehicles.values(), start=1):
+        # Export-local labels preserve correlation without publishing backend ids.
+        vehicle_label = f"vehicle_{index}"
         try:
-            vehicles.append({"vehicle_id": vehicle_id, "data": asdict(vehicle)})
+            data = redact(asdict(vehicle))
+            data["id"] = vehicle_label
+            vehicles.append({"vehicle_id": vehicle_label, "data": data})
         except Exception as exc:
             vehicles.append(
-                {"vehicle_id": vehicle_id, "error": f"{type(exc).__name__}: {exc}"}
+                {"vehicle_id": vehicle_label, "error": type(exc).__name__[:64]}
             )
     return vehicles
 
@@ -127,8 +131,7 @@ async def async_get_config_entry_diagnostics(
     # Redact only the uncontrolled Vehicle data (raw asdict: GPS, VIN, geocode
     # address, region-specific field names). Whole-payload redaction collides
     # on constructed key names like the "email" in `use_email_with_geocode_api`.
-    vehicles = _vehicles_payload(coordinator)
-    payload["vehicles"] = [redact(v) for v in vehicles]
+    payload["vehicles"] = _vehicles_payload(coordinator)
     local_diagnostics = vm.get_local_diagnostics
     if callable(local_diagnostics):
         summary = await hass.async_add_executor_job(local_diagnostics)

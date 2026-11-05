@@ -76,7 +76,7 @@ def test_state_fields_with_short_substrings_survive() -> None:
 
 
 def test_preserves_state_keys() -> None:
-    assert redact({"vehicle_id": "abc"}) == {"vehicle_id": "abc"}
+    assert redact({"vehicle_id": "abc"}) == {"vehicle_id": REDACTED}
     assert redact({"battery_level": 80}) == {"battery_level": 80}
     assert redact({"odometer": 5000}) == {"odometer": 5000}
     assert redact({"region": "europe"}) == {"region": "europe"}

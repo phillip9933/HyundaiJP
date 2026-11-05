@@ -114,11 +114,54 @@ async def test_vehicle_gps_redacted() -> None:
     payload = await async_get_config_entry_diagnostics(hass, _make_entry())
 
     car = payload["vehicles"][0]
-    assert car["vehicle_id"] == "car1"
+    assert car["vehicle_id"] == "vehicle_1"
     assert car["data"]["_location_latitude"] == REDACTED
     assert car["data"]["_location_longitude"] == REDACTED
     # ordinary state survives
-    assert car["data"]["id"] == "car1"
+    assert car["data"]["id"] == "vehicle_1"
+
+
+async def test_vehicle_labels_preserve_correlation_without_backend_identifiers():
+    first = Vehicle(id="BACKEND_FIRST", name="IONIQ 5")
+    first.data = {
+        "vehicleId": "BACKEND_FIRST",
+        "nested": {"id": "non-vehicle-component", "voltage": 12.6},
+    }
+    second = Vehicle(id="BACKEND_SECOND", name="IONIQ 6")
+    coordinator = _make_coordinator()
+    coordinator.vehicle_manager.vehicles = {first.id: first, second.id: second}
+
+    payload = await async_get_config_entry_diagnostics(
+        _make_hass(coordinator), _make_entry()
+    )
+
+    cars = payload["vehicles"]
+    assert [car["vehicle_id"] for car in cars] == ["vehicle_1", "vehicle_2"]
+    assert all(car["vehicle_id"] == car["data"]["id"] for car in cars)
+    assert "BACKEND_FIRST" not in json.dumps(payload, default=str)
+    assert "BACKEND_SECOND" not in json.dumps(payload, default=str)
+    assert cars[0]["data"]["data"]["nested"] == {
+        "id": "non-vehicle-component",
+        "voltage": 12.6,
+    }
+
+
+async def test_serialization_failure_does_not_export_exception_text(monkeypatch):
+    coordinator = _make_coordinator()
+    coordinator.vehicle_manager.vehicles = {
+        "PRIVATE_BACKEND_ID": Vehicle(id="PRIVATE_BACKEND_ID")
+    }
+
+    def fail_serialization(_vehicle):
+        raise ValueError("PRIVATE_BACKEND_ID PRIVATE_ACCOUNT_DETAILS")
+
+    monkeypatch.setattr(diagnostics_mod, "asdict", fail_serialization)
+    payload = await async_get_config_entry_diagnostics(
+        _make_hass(coordinator), _make_entry()
+    )
+
+    assert payload["vehicles"] == [{"vehicle_id": "vehicle_1", "error": "ValueError"}]
+    assert "PRIVATE_" not in json.dumps(payload, default=str)
 
 
 @pytest.mark.asyncio
@@ -239,7 +282,7 @@ async def test_local_protocol_diagnostics_are_passive_and_off_event_loop() -> No
         "last_refresh": {},
     }
     assert len(seen) == 1 and seen[0] != loop_thread_id
-    assert "SYNTHETIC_PRIVATE" not in json.dumps(payload)
+    assert "SYNTHETIC_PRIVATE" not in json.dumps(payload, default=str)
     api.session.request.assert_not_called()
 
 
@@ -258,9 +301,9 @@ async def test_broken_vehicle_does_not_kill_dump() -> None:
     payload = await async_get_config_entry_diagnostics(hass, _make_entry())
 
     vehicles = {v["vehicle_id"]: v for v in payload["vehicles"]}
-    assert vehicles["good"]["data"]["id"] == "good"
-    assert "error" in vehicles["bad"]
-    assert "data" not in vehicles["bad"]
+    assert vehicles["vehicle_1"]["data"]["id"] == "vehicle_1"
+    assert vehicles["vehicle_2"]["error"] == "TypeError"
+    assert "data" not in vehicles["vehicle_2"]
 
 
 @pytest.mark.asyncio
