@@ -5,7 +5,7 @@ import logging
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
-from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import config_validation as cv, entity_registry as er
 from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.typing import ConfigType
 
@@ -53,6 +53,17 @@ async def async_setup_entry(
         raise ConfigEntryNotReady(f"Config Not Ready: {ex}") from ex
 
     config_entry.runtime_data = coordinator
+    # Retire only the old port switches owned by this account. This is
+    # idempotent, including after rolling back to a release that recreates them.
+    registry = er.async_get(hass)
+    for entity in er.async_entries_for_config_entry(registry, config_entry.entry_id):
+        if (
+            entity.domain == "switch"
+            and entity.platform == DOMAIN
+            and entity.unique_id.startswith(f"{DOMAIN}_")
+            and entity.unique_id.endswith("_ev_charge_port_door_is_open")
+        ):
+            registry.async_remove(entity.entity_id)
     await hass.config_entries.async_forward_entry_setups(config_entry, PLATFORMS)
     return True
 

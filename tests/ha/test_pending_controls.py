@@ -20,10 +20,7 @@ from custom_components.hyundai_jp.cover import (
     async_setup_entry,
 )
 from custom_components.hyundai_jp.lock import HyundaiBluelinkLock
-from custom_components.hyundai_jp.switch import (
-    SWITCH_DESCRIPTIONS,
-    HyundaiBluelinkSwitch,
-)
+from custom_components.hyundai_jp.switch import SWITCH_DESCRIPTIONS
 from tests.ha.helpers import make_coordinator, make_hass, make_operation_coordinator
 
 
@@ -260,20 +257,8 @@ async def test_charge_port_exists_even_when_windows_are_unsupported():
     assert isinstance(added.call_args.args[0][0], HyundaiBluelinkChargePortCover)
 
 
-def test_legacy_port_switch_preserves_unique_id_and_only_sets_new_entry_defaults():
-    vehicle = Vehicle(id="synthetic", ev_charge_port_door_is_open=False)
-    coordinator = make_coordinator(vehicle)
-    description = next(
-        d for d in SWITCH_DESCRIPTIONS if d.key == "ev_charge_port_door_is_open"
-    )
-    switch = HyundaiBluelinkSwitch(coordinator, description, vehicle)
-    cover = HyundaiBluelinkChargePortCover(coordinator, vehicle)
-    assert switch.unique_id == "hyundai_jp_synthetic_ev_charge_port_door_is_open"
-    assert cover.unique_id == "hyundai_jp_synthetic_charge_port"
-    assert switch.entity_category == EntityCategory.CONFIG
-    assert switch.entity_registry_visible_default is False
-    assert switch.entity_registry_enabled_default is True
-    assert switch.translation_key == "ev_charge_port_door_legacy"
+def test_port_has_no_duplicate_switch_control():
+    assert "ev_charge_port_door_is_open" not in {d.key for d in SWITCH_DESCRIPTIONS}
 
 
 def make_port_button(coordinator, vehicle):

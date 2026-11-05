@@ -8,7 +8,7 @@ from homeassistant import loader
 from homeassistant.config_entries import ConfigEntries, ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import frame
+from homeassistant.helpers import device_registry as dr, entity_registry as er, frame
 import pytest
 
 from custom_components import hyundai_jp
@@ -38,6 +38,10 @@ async def test_real_entry_runtime_reload_and_services_lifetime(monkeypatch, tmp_
     frame.async_setup(hass)
     loader.async_setup(hass)
     hass.config_entries = ConfigEntries(hass, {})
+    await hass.config_entries.async_initialize()
+    dr.async_setup(hass)
+    await dr.async_load(hass, load_empty=True)
+    await er.async_load(hass, load_empty=True)
     entries = [_entry("a"), _entry("b")]
     integration = loader.Integration(
         hass,

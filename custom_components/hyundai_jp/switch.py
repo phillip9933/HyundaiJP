@@ -162,15 +162,6 @@ SWITCH_DESCRIPTIONS: Final[tuple[HyundaiBluelinkSwitchDescription, ...]] = (
         ),
     ),
     HyundaiBluelinkSwitchDescription(
-        key="ev_charge_port_door_is_open",
-        translation_key="ev_charge_port_door_legacy",
-        icon="mdi:power-plug-outline",
-        value_fn=lambda vehicle: vehicle.ev_charge_port_door_is_open,
-        exists_fn=lambda vehicle: vehicle.ev_charge_port_door_is_open is not None,
-        on_fn=lambda coordinator, vid: coordinator.async_open_charge_port(vid),
-        off_fn=lambda coordinator, vid: coordinator.async_close_charge_port(vid),
-    ),
-    HyundaiBluelinkSwitchDescription(
         key="valet_mode_control",
         translation_key="valet_mode_control",
         icon="mdi:key-variant",
@@ -224,11 +215,6 @@ class HyundaiBluelinkSwitch(SwitchEntity, HyundaiBluelinkEntity):
         self.entity_description = description
         self._attr_unique_id = f"{DOMAIN}_{vehicle.id}_{description.key}"
         self._attr_icon = description.icon
-        if description.key == "ev_charge_port_door_is_open":
-            # Keep old entity IDs and automation calls intact. These defaults
-            # apply to newly created registry entries, never edit existing ones.
-            self._attr_entity_category = EntityCategory.CONFIG
-            self._attr_entity_registry_visible_default = False
 
     @property
     def is_on(self) -> bool | None:

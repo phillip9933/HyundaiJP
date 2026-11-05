@@ -890,17 +890,11 @@
       "ev_schedule_charge_enabled": {
         "name": "Scheduled charging"
       },
-      "ev_charge_port_door": {
-        "name": "Charge Port"
-      },
       "valet_mode_control": {
         "name": "Valet Mode"
       },
       "svm_dewarp": {
         "name": "SVM Dewarp"
-      },
-      "ev_charge_port_door_legacy": {
-        "name": "Charge Port (legacy)"
       }
     },
     "climate": {

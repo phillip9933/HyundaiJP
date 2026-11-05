@@ -15,6 +15,7 @@ from custom_components.hyundai_jp.entity import HyundaiBluelinkEntity
 
 
 async def test_setup_and_unload_only_the_new_domain(monkeypatch):
+    monkeypatch.setattr(hyundai_jp.er, "async_get", MagicMock())
     old_coordinator = SimpleNamespace(async_shutdown=AsyncMock())
     coordinator = SimpleNamespace(
         async_config_entry_first_refresh=AsyncMock(), async_shutdown=AsyncMock()
@@ -30,7 +31,7 @@ async def test_setup_and_unload_only_the_new_domain(monkeypatch):
         ),
         services=MagicMock(),
     )
-    entry = SimpleNamespace(unique_id="new-entry", domain=DOMAIN)
+    entry = SimpleNamespace(entry_id="new-entry", unique_id="new-entry", domain=DOMAIN)
     assert await hyundai_jp.async_setup(hass, {})
     assert await hyundai_jp.async_setup_entry(hass, entry)
     factory.assert_called_once_with(hass, entry)
