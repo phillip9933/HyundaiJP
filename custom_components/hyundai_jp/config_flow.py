@@ -104,7 +104,6 @@ OPTIONS_SCHEMA = vol.Schema(
 
 async def validate_input(
     hass: HomeAssistant,
-    user_input: dict[str, Any],
     vehicle_manager: VehicleManager,
 ) -> bool:
     """Validate the user input allows us to connect."""
@@ -147,7 +146,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     def __init__(self) -> None:
         """Initialize the config flow."""
-        self._vehicle_manager: VehicleManager | None = None
         self._is_reconfigure = False
 
     @staticmethod
@@ -181,9 +179,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     password=full_config[CONF_PASSWORD],
                     pin=pin,
                 )
-                self._vehicle_manager = vehicle_manager
                 try:
-                    await validate_input(self.hass, full_config, vehicle_manager)
+                    await validate_input(self.hass, vehicle_manager)
                     if vehicle_manager.token is not None:
                         full_config[CONF_TOKEN] = vehicle_manager.token.to_dict()
                 except InvalidAuth:

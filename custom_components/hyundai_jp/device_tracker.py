@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import logging
-
 # Canonical import path since HA 2026.6 (config_entry alias removed 2027.6);
 # the ignore covers HA's implicit re-export, rejected by mypy --strict.
 from homeassistant.components.device_tracker import TrackerEntity  # type: ignore[attr-defined]
@@ -14,10 +12,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from ._api import Vehicle
 from .const import DOMAIN
+from .coordinator import JapanDataUpdateCoordinator
 from .entity import HyundaiKiaConnectEntity
-from .japan_coordinator import JapanDataUpdateCoordinator
-
-_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(

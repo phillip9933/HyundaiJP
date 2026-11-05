@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-import logging
 from typing import Final
 
 from homeassistant.components.button import ButtonEntity, ButtonEntityDescription
@@ -14,10 +13,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from ._api import Vehicle
 from .const import DOMAIN
+from .coordinator import JapanDataUpdateCoordinator
 from .entity import HyundaiKiaConnectEntity
-from .japan_coordinator import JapanDataUpdateCoordinator
-
-_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -59,7 +56,7 @@ BUTTON_DESCRIPTIONS: Final[tuple[HyundaiKiaButtonDescription, ...]] = (
         translation_key="start_valet_mode",
         icon="mdi:key-variant",
         press_action="async_start_valet_mode",
-        exists_fn=lambda vehicle: bool(vehicle.supports_valet_mode),
+        exists_fn=lambda vehicle: bool(vehicle.supports.valet_mode),
     ),
     HyundaiKiaButtonDescription(
         key="stop_valet_mode",
@@ -67,7 +64,7 @@ BUTTON_DESCRIPTIONS: Final[tuple[HyundaiKiaButtonDescription, ...]] = (
         translation_key="stop_valet_mode",
         icon="mdi:key-variant",
         press_action="async_stop_valet_mode",
-        exists_fn=lambda vehicle: bool(vehicle.supports_valet_mode),
+        exists_fn=lambda vehicle: bool(vehicle.supports.valet_mode),
     ),
     HyundaiKiaButtonDescription(
         key="open_all_windows",

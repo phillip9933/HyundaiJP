@@ -5,7 +5,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from ._api import Vehicle
 from .const import DOMAIN
-from .japan_coordinator import JapanDataUpdateCoordinator
+from .coordinator import JapanDataUpdateCoordinator
 
 
 class HyundaiKiaConnectEntity(CoordinatorEntity[JapanDataUpdateCoordinator]):

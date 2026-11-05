@@ -7,9 +7,7 @@ import pytest
 from custom_components.hyundai_jp import coordinator as coordinator_module
 from custom_components.hyundai_jp._api import Vehicle, VehicleManager
 from custom_components.hyundai_jp.const import DOMAIN
-from custom_components.hyundai_jp.coordinator import (
-    HyundaiKiaConnectDataUpdateCoordinator,
-)
+from custom_components.hyundai_jp.coordinator import JapanDataUpdateCoordinator
 
 
 def _sync(
@@ -27,9 +25,7 @@ def _sync(
     registry.async_get_device.side_effect = get_device
     monkeypatch.setattr(coordinator_module.dr, "async_get", lambda _: registry)
 
-    coordinator = HyundaiKiaConnectDataUpdateCoordinator.__new__(
-        HyundaiKiaConnectDataUpdateCoordinator
-    )
+    coordinator = JapanDataUpdateCoordinator.__new__(JapanDataUpdateCoordinator)
     coordinator.hass = MagicMock()
     coordinator.vehicle_manager = manager
     coordinator._sync_vehicle_enabled_states()

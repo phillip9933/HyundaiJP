@@ -9,7 +9,7 @@ import pytest
 
 from custom_components.hyundai_jp._api.const import ORDER_STATUS
 from custom_components.hyundai_jp._api.VehicleManager import VehicleManager
-from custom_components.hyundai_jp.japan_coordinator import JapanDataUpdateCoordinator
+from custom_components.hyundai_jp.coordinator import JapanDataUpdateCoordinator
 
 
 def coordinator():

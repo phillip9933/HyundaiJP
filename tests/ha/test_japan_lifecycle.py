@@ -7,7 +7,7 @@ import pytest
 
 from custom_components.hyundai_jp._api import Vehicle
 from custom_components.hyundai_jp._api.exceptions import ServiceTemporaryUnavailable
-from custom_components.hyundai_jp.japan_coordinator import JapanDataUpdateCoordinator
+from custom_components.hyundai_jp.coordinator import JapanDataUpdateCoordinator
 from tests.ha.test_region_operation_serialization import coordinator
 
 

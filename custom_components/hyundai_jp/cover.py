@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import logging
 from typing import Any, Final
 
 from homeassistant.components.cover import (
@@ -20,10 +19,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from ._api import Vehicle, WindowRequestOptions
 from ._api.const import WINDOW_STATE
 from .const import DOMAIN
+from .coordinator import JapanDataUpdateCoordinator
 from .entity import HyundaiKiaConnectEntity
-from .japan_coordinator import JapanDataUpdateCoordinator
-
-_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, kw_only=True)

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from homeassistant.components.lock import LockEntity
@@ -12,10 +11,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from ._api import Vehicle
 from .const import DOMAIN
+from .coordinator import JapanDataUpdateCoordinator
 from .entity import HyundaiKiaConnectEntity
-from .japan_coordinator import JapanDataUpdateCoordinator
-
-_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(

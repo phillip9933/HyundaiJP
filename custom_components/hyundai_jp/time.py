@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 import datetime as dt
-import logging
 from typing import Final
 
 from homeassistant.components.time import TimeEntity, TimeEntityDescription
@@ -15,10 +14,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from ._api import Vehicle
 from .const import DOMAIN
+from .coordinator import JapanDataUpdateCoordinator
 from .entity import HyundaiKiaConnectEntity
-from .japan_coordinator import JapanDataUpdateCoordinator
-
-_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -61,9 +58,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up time entities from a config entry."""
     coordinator = hass.data[DOMAIN][config_entry.unique_id]
-    if isinstance(coordinator, JapanDataUpdateCoordinator) and not (
-        coordinator.supports_command("schedule_charging_and_climate")
-    ):
+    if not coordinator.supports_command("schedule_charging_and_climate"):
         async_add_entities([])
         return
     entities = []

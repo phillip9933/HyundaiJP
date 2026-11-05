@@ -8,7 +8,7 @@ from homeassistant.exceptions import HomeAssistantError
 import pytest
 
 from custom_components.hyundai_jp._api.const import ORDER_STATUS
-from custom_components.hyundai_jp.japan_coordinator import JapanDataUpdateCoordinator
+from custom_components.hyundai_jp.coordinator import JapanDataUpdateCoordinator
 
 
 def coordinator():
@@ -105,9 +105,7 @@ async def test_confirmation_error_preserves_specific_outcome(
 
 async def test_http_acceptance_completes_without_waiting_for_mqtt(monkeypatch):
     sleep = AsyncMock()
-    monkeypatch.setattr(
-        "custom_components.hyundai_jp.japan_coordinator.asyncio.sleep", sleep
-    )
+    monkeypatch.setattr("custom_components.hyundai_jp.coordinator.asyncio.sleep", sleep)
     result = coordinator()
     result.hass.async_add_executor_job.side_effect = [
         "SYNTHETIC_ID",

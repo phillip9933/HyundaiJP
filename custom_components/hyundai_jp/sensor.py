@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
-import logging
 from typing import Any, Final, cast
 
 from homeassistant.components.sensor import (
@@ -31,10 +30,8 @@ from homeassistant.helpers.typing import StateType
 from ._api import Vehicle
 from ._api.const import ENGINE_TYPES
 from .const import CHARGING_CURRENTS, DOMAIN, DYNAMIC_UNIT
+from .coordinator import JapanDataUpdateCoordinator
 from .entity import HyundaiKiaConnectEntity
-from .japan_coordinator import JapanDataUpdateCoordinator
-
-_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)

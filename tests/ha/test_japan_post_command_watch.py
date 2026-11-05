@@ -4,7 +4,7 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
-from custom_components.hyundai_jp.japan_coordinator import JapanDataUpdateCoordinator
+from custom_components.hyundai_jp.coordinator import JapanDataUpdateCoordinator
 from tests.ha.test_region_operation_serialization import coordinator
 
 

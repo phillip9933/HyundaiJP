@@ -7,7 +7,7 @@ import pytest
 
 from custom_components.hyundai_jp._api import Vehicle
 from custom_components.hyundai_jp.climate import HyundaiKiaCarClimateControlSwitch
-from custom_components.hyundai_jp.japan_coordinator import JapanDataUpdateCoordinator
+from custom_components.hyundai_jp.coordinator import JapanDataUpdateCoordinator
 
 
 def entity(bounds=None, unit=UnitOfTemperature.CELSIUS, japan=True):

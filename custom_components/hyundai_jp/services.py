@@ -18,7 +18,7 @@ from ._api import (
     WindowRequestOptions,
 )
 from .const import DOMAIN, OffPeakChargingMode
-from .coordinator import HyundaiKiaConnectDataUpdateCoordinator
+from .coordinator import JapanDataUpdateCoordinator
 
 SERVICE_UPDATE = "update"
 SERVICE_FORCE_UPDATE = "force_update"
@@ -382,7 +382,7 @@ def _get_vehicle_id_from_device(hass: HomeAssistant, call: ServiceCall) -> str:
     coordinators = list(hass.data[DOMAIN].keys())
     if len(coordinators) == 1:
         coordinator = cast(
-            HyundaiKiaConnectDataUpdateCoordinator, hass.data[DOMAIN][coordinators[0]]
+            JapanDataUpdateCoordinator, hass.data[DOMAIN][coordinators[0]]
         )
         vehicles = coordinator.vehicle_manager.vehicles
         if len(vehicles) == 1:
@@ -413,12 +413,10 @@ def _get_vehicle_id_from_device(hass: HomeAssistant, call: ServiceCall) -> str:
 
 def _get_coordinator_from_device(
     hass: HomeAssistant, call: ServiceCall
-) -> HyundaiKiaConnectDataUpdateCoordinator:
+) -> JapanDataUpdateCoordinator:
     coordinators = list(hass.data[DOMAIN].keys())
     if len(coordinators) == 1:
-        return cast(
-            HyundaiKiaConnectDataUpdateCoordinator, hass.data[DOMAIN][coordinators[0]]
-        )
+        return cast(JapanDataUpdateCoordinator, hass.data[DOMAIN][coordinators[0]])
     else:
         device_entry = device_registry.async_get(hass).async_get(
             call.data[ATTR_DEVICE_ID]
@@ -447,6 +445,6 @@ def _get_coordinator_from_device(
             raise HomeAssistantError(f"Config entry {config_entry_id} not found")
         config_entry_unique_id = config_entry.unique_id
         return cast(
-            HyundaiKiaConnectDataUpdateCoordinator,
+            JapanDataUpdateCoordinator,
             hass.data[DOMAIN][config_entry_unique_id],
         )

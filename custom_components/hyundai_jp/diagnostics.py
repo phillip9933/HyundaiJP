@@ -35,7 +35,7 @@ from .const import (
     HYUNDAI_BRAND,
     JAPAN_REGION,
 )
-from .japan_coordinator import JapanDataUpdateCoordinator
+from .coordinator import JapanDataUpdateCoordinator
 from .redact import redact
 
 

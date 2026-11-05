@@ -3,7 +3,7 @@
 import asyncio
 import threading
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, call
 
 from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
@@ -15,9 +15,7 @@ import pytest
 
 from custom_components import hyundai_jp
 from custom_components.hyundai_jp.const import DOMAIN
-from custom_components.hyundai_jp.coordinator import (
-    HyundaiKiaConnectDataUpdateCoordinator,
-)
+from custom_components.hyundai_jp.coordinator import JapanDataUpdateCoordinator
 
 
 @pytest.fixture
@@ -28,12 +26,12 @@ def stop_polling(monkeypatch):
 
 
 def coordinator(manager):
-    result = HyundaiKiaConnectDataUpdateCoordinator.__new__(
-        HyundaiKiaConnectDataUpdateCoordinator
-    )
+    result = JapanDataUpdateCoordinator.__new__(JapanDataUpdateCoordinator)
     result.hass = SimpleNamespace(
         async_add_executor_job=AsyncMock(side_effect=lambda target: target())
     )
+    if not hasattr(manager, "api"):
+        manager.api = SimpleNamespace(close=Mock())
     result.vehicle_manager = manager
     result._action_lock = asyncio.Lock()
     return result
@@ -76,15 +74,6 @@ async def test_shutdown_waits_for_active_command_and_closes_off_loop(stop_pollin
 
     assert events == ["polling_stopped", "command_finished", "manager_closed"]
     assert close_threads[0] != loop_thread
-
-
-async def test_older_library_without_manager_close_still_stops_polling(stop_polling):
-    result = coordinator(SimpleNamespace())
-
-    await result.async_shutdown()
-
-    stop_polling.assert_awaited_once()
-    result.hass.async_add_executor_job.assert_not_awaited()
 
 
 async def test_successful_unload_closes_only_that_manager(monkeypatch, stop_polling):
@@ -272,7 +261,10 @@ async def test_no_api_jobs_submitted_after_shutdown(stop_polling):
     with pytest.raises(HomeAssistantError, match="shutting down"):
         await result._async_api_job(target)
 
-    result.hass.async_add_executor_job.assert_awaited_once_with(close)
+    assert result.hass.async_add_executor_job.await_args_list == [
+        call(close),
+        call(result.vehicle_manager.api.close),
+    ]
     target.assert_not_called()
 
 

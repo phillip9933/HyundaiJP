@@ -8,7 +8,7 @@ import pytest
 
 from custom_components.hyundai_jp import button, climate, lock, number, switch
 from custom_components.hyundai_jp._api import Vehicle
-from custom_components.hyundai_jp.japan_coordinator import JapanDataUpdateCoordinator
+from custom_components.hyundai_jp.coordinator import JapanDataUpdateCoordinator
 from tests.ha.conftest import make_coordinator, make_hass
 
 

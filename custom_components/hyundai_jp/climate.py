@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import logging
-from typing import Any, ClassVar, cast
+from typing import Any, cast
 
 from homeassistant.components.climate import ClimateEntity, ClimateEntityDescription
 from homeassistant.components.climate.const import (
@@ -20,10 +19,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from ._api import ClimateRequestOptions, Vehicle
 from .const import DOMAIN
+from .coordinator import JapanDataUpdateCoordinator
 from .entity import HyundaiKiaConnectEntity
-from .japan_coordinator import JapanDataUpdateCoordinator
-
-_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
@@ -57,19 +54,6 @@ class HyundaiKiaCarClimateControlSwitch(HyundaiKiaConnectEntity, ClimateEntity):
     # The python lib climate request is also treated as
     # internal target state that can be sent to the car
     climate_config: ClimateRequestOptions
-
-    # TODO: if possible in Climate, add possibility to set those
-    # as well. Are there maybe additional properties?
-    heat_status_int_to_str: ClassVar[dict[int | None, str | None]] = {
-        None: None,
-        0: "Off",
-        1: "Steering Wheel and Rear Window",
-        2: "Rear Window",
-        3: "Steering Wheel",
-    }
-    heat_status_str_to_int: ClassVar[dict[str | None, int | None]] = {
-        v: k for [k, v] in heat_status_int_to_str.items()
-    }
 
     def get_internal_heat_int_for_climate_request(self) -> int:
         """Map the current rear window / steering wheel heater state to the API heating code."""

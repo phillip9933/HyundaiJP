@@ -10,8 +10,7 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.device_registry import DeviceEntry
 
 from .const import DOMAIN
-from .coordinator import HyundaiKiaConnectDataUpdateCoordinator
-from .japan_coordinator import JapanDataUpdateCoordinator
+from .coordinator import JapanDataUpdateCoordinator
 from .services import async_setup_services, async_unload_services
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -53,7 +52,7 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
 
 
 async def _async_shutdown_coordinator(
-    coordinator: HyundaiKiaConnectDataUpdateCoordinator,
+    coordinator: JapanDataUpdateCoordinator,
 ) -> None:
     try:
         await coordinator.async_shutdown()

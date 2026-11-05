@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import logging
 from typing import Any
@@ -16,14 +17,10 @@ import pytest
 from custom_components.hyundai_jp import coordinator as coordinator_module
 from custom_components.hyundai_jp._api.exceptions import (
     AuthenticationError,
-    AuthenticationInvalidCredentialsError,
-    AuthenticationTokenExpiredError,
     RateLimitingError,
     ServiceTemporaryUnavailable,
 )
-from custom_components.hyundai_jp.coordinator import (
-    HyundaiKiaConnectDataUpdateCoordinator,
-)
+from custom_components.hyundai_jp.coordinator import JapanDataUpdateCoordinator
 from custom_components.hyundai_jp.entity import HyundaiKiaConnectEntity
 
 
@@ -64,11 +61,10 @@ def _make_coordinator(
     vehicles: dict[str, _FakeVehicle],
     failures: dict[str, Exception] | None = None,
     cached_failures: dict[str, Exception] | None = None,
-) -> HyundaiKiaConnectDataUpdateCoordinator:
+) -> JapanDataUpdateCoordinator:
     """Build a coordinator with the attributes the polling code touches."""
-    coordinator = HyundaiKiaConnectDataUpdateCoordinator.__new__(
-        HyundaiKiaConnectDataUpdateCoordinator
-    )
+    coordinator = JapanDataUpdateCoordinator.__new__(JapanDataUpdateCoordinator)
+    coordinator._action_lock = asyncio.Lock()
     coordinator.hass = _FakeHass()  # type: ignore[assignment]
     coordinator.force_refresh_interval = 1440
     coordinator._failed_vehicles = set()
@@ -186,8 +182,8 @@ async def test_auth_error_from_all_vehicles_raises_update_failed() -> None:
     coordinator = _make_coordinator(
         {"a": _FakeVehicle("a"), "b": _FakeVehicle("b")},
         {
-            "a": AuthenticationTokenExpiredError("Access token is deleted"),
-            "b": AuthenticationTokenExpiredError("Access token is deleted"),
+            "a": AuthenticationError("Access token is deleted"),
+            "b": AuthenticationError("Access token is deleted"),
         },
     )
 
@@ -200,7 +196,7 @@ async def test_auth_error_from_token_check_raises_config_entry_auth_failed() -> 
     coordinator = _make_coordinator({"a": _FakeVehicle("a")})
     coordinator.scan_interval = 1800
     coordinator.async_check_and_refresh_token = AsyncMock(  # type: ignore[method-assign]
-        side_effect=AuthenticationInvalidCredentialsError("7404")
+        side_effect=AuthenticationError("7404")
     )
 
     with pytest.raises(ConfigEntryAuthFailed):
@@ -362,7 +358,7 @@ _LATE = dt.datetime(2026, 10, 28, 23, 0, 0, tzinfo=dt.UTC)
 
 def _make_update_coordinator(
     vehicles: dict[str, _FakeVehicle],
-) -> HyundaiKiaConnectDataUpdateCoordinator:
+) -> JapanDataUpdateCoordinator:
     """Build a coordinator with the attributes the update paths touch."""
     coordinator = _make_coordinator(vehicles)
     coordinator.data = None  # type: ignore[assignment]
@@ -402,9 +398,7 @@ async def test_update_service_polls_cached() -> None:
         {"a": _FakeVehicle("a"), "b": _FakeVehicle("b")}
     )
 
-    with patch.object(
-        HyundaiKiaConnectDataUpdateCoordinator, "async_set_updated_data"
-    ) as notify:
+    with patch.object(JapanDataUpdateCoordinator, "async_set_updated_data") as notify:
         await coordinator.async_update_all()
 
     assert coordinator.vehicle_manager.calls == [("cached", "a"), ("cached", "b")]
@@ -418,9 +412,7 @@ async def test_force_update_service_forces_each_vehicle() -> None:
         {"a": _FakeVehicle("a"), "b": _FakeVehicle("b")}
     )
 
-    with patch.object(
-        HyundaiKiaConnectDataUpdateCoordinator, "async_set_updated_data"
-    ) as notify:
+    with patch.object(JapanDataUpdateCoordinator, "async_set_updated_data") as notify:
         await coordinator.async_force_update_all()
 
     assert coordinator.vehicle_manager.calls == [("force-now", "a"), ("force-now", "b")]
@@ -445,7 +437,7 @@ def test_init_creates_the_per_vehicle_state(
         "use_email_with_geocode_api": False,
     }
 
-    coordinator = HyundaiKiaConnectDataUpdateCoordinator(hass, entry)
+    coordinator = JapanDataUpdateCoordinator(hass, entry)
 
     assert coordinator._failed_vehicles == set()
     assert coordinator._vehicle_failures == {}

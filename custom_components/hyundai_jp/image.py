@@ -22,9 +22,8 @@ from homeassistant.util import dt as dt_util
 
 from ._api import Vehicle
 from .const import DOMAIN
-from .coordinator import SIGNAL_SVM_RENDER
+from .coordinator import SIGNAL_SVM_RENDER, JapanDataUpdateCoordinator
 from .entity import HyundaiKiaConnectEntity
-from .japan_coordinator import JapanDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 

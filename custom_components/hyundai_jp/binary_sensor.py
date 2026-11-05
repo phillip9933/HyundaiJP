@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-import logging
 from typing import Final
 
 from homeassistant.components.binary_sensor import (
@@ -20,10 +19,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from ._api import Vehicle
 from ._api.const import SEAT_STATUS
 from .const import DOMAIN
+from .coordinator import JapanDataUpdateCoordinator
 from .entity import HyundaiKiaConnectEntity
-from .japan_coordinator import JapanDataUpdateCoordinator
-
-_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, kw_only=True)

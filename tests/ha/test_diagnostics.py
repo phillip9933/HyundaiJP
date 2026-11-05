@@ -220,9 +220,7 @@ async def test_local_protocol_diagnostics_are_passive_and_off_event_loop() -> No
 
     api.get_local_diagnostics = local_diagnostics
     coordinator = _make_coordinator()
-    from custom_components.hyundai_jp.japan_coordinator import (
-        JapanDataUpdateCoordinator,
-    )
+    from custom_components.hyundai_jp.coordinator import JapanDataUpdateCoordinator
 
     coordinator.__class__ = JapanDataUpdateCoordinator
     coordinator.vehicle_manager.api = api
