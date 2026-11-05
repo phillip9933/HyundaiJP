@@ -16,6 +16,7 @@ import re
 import ssl
 import threading
 from typing import Any, Literal, cast, overload
+import uuid
 
 import paho.mqtt.client as mqtt
 import requests
@@ -31,7 +32,13 @@ from .exceptions import (
 )
 from .http import BluelinkSession
 from .mqtt_client import MqttTransport
-from .mqtt_service_hub import ServiceHubProviderMixin, build_car_status_topics
+from .mqtt_service_hub import (
+    MQTT_PROTOCOL_ID_CCU_UPDATE,
+    MQTT_PROTOCOL_ID_CONNECTION,
+    MQTT_PROTOCOL_ID_RES,
+    MQTT_PROTOCOL_ID_VSS,
+    build_car_status_topics,
+)
 from .Token import Token
 from .Vehicle import Vehicle
 
@@ -149,7 +156,7 @@ class _JapanConnection:
                 helper._on_message(None, None, message)
 
 
-class JapanMqttSession(ServiceHubProviderMixin):
+class JapanMqttSession:
     """One vehicle's bounded command-completion session; caller must close it."""
 
     SERVICEHUB_URL = "https://egw-svchub-ccs-h-jp.ap-northeast.hmgmobility.com:31010"
@@ -240,39 +247,18 @@ class JapanMqttSession(ServiceHubProviderMixin):
         self._bootstrap_failure = "none"
         self._bootstrap_http_status: int | None = None
 
-    @property
-    def _service_hub_brand(self) -> str:
-        return "H"
+    def _registration_headers(self, *, client: bool = False) -> dict[str, str]:
+        """Carry the broker transaction identity through registration."""
+        headers = {"tid": self._service_hub_tid or str(uuid.uuid4())}
+        if client:
+            headers["client-id"] = self._registered_client_id or ""
+        return headers
 
-    def _service_hub_registration_uuid(self, token: Token) -> str:
-        return self._registration_uuid + "_BLU"
-
-    def _service_hub_registered_client_id(self, token: Token) -> str:
-        return self._registered_client_id or ""
-
-    def _service_hub_request(
-        self,
-        token: Token,
-        method: str,
-        path: str,
-        *,
-        headers: dict[str, str] | None = None,
-        params: dict[str, Any] | None = None,
-        json: dict[str, Any] | None = None,
-        allow_not_found: bool = False,
-    ) -> dict[str, Any] | None:
-        kwargs: dict[str, Any] = {}
-        if params is not None:
-            kwargs["params"] = params
-        if json is not None:
-            kwargs["json"] = json
-        if allow_not_found:
-            return self._http(
-                method, path, headers=headers, allow_not_found=True, **kwargs
-            )
-        return cast(dict[str, Any], self._http(method, path, headers=headers, **kwargs))
-
-    def _service_hub_broker_info(self, data: dict[str, Any]) -> dict[str, Any]:
+    def get_push_broker_info(self, token: Token) -> dict[str, Any] | None:
+        """Read and validate this Japan session's TLS broker and transaction ID."""
+        data = self._http("GET", "/api/v3/servicehub/device/host")
+        if data is None:
+            return None
         host, port = self._broker(data)
         tid = data.get("tid")
         if (
@@ -285,26 +271,90 @@ class JapanMqttSession(ServiceHubProviderMixin):
         self._service_hub_tid = tid
         return {"mqtt_host": host, "mqtt_port": port}
 
-    def _service_hub_client_id(self, data: dict[str, Any]) -> str:
-        value = data.get("clientId")
-        if not isinstance(value, str) or not re.fullmatch(
-            r"[A-Za-z0-9_.:-]{1,256}", value
+    def register_push_client(self, token: Token) -> dict[str, Any] | None:
+        """Register the Japan app's mobile UUID and validate its broker client ID."""
+        data = self._http(
+            "POST",
+            "/api/v3/servicehub/device/register",
+            headers=self._registration_headers(),
+            json={"unit": "mobile", "uuid": self._registration_uuid + "_BLU"},
+        )
+        if data is None:
+            return None
+        client_id = data.get("clientId")
+        if not isinstance(client_id, str) or not re.fullmatch(
+            r"[A-Za-z0-9_.:-]{1,256}", client_id
         ):
             raise InvalidAPIResponseError("Japan MQTT client identity is invalid")
-        self._registered_client_id = value
-        return value
+        self._registered_client_id = client_id
+        token.mqtt_client_id = client_id
+        return {
+            "client_id": client_id,
+            "device_id": data.get("deviceId"),
+            "username": data.get("username"),
+            "password": data.get("password"),
+        }
 
-    def _service_hub_apply_metadata(
-        self, data: dict[str, Any], vehicle: Vehicle
-    ) -> None:
-        vehicle.mqtt_vehicle_id = self._metadata_vehicle_id(data)
+    def register_push_vehicle(
+        self, token: Token, vehicle: Vehicle
+    ) -> dict[str, Any] | None:
+        """Register the Japan result/status/connection protocol set in app order."""
+        return self._http(
+            "POST",
+            "/api/v3/servicehub/device/protocol",
+            headers=self._registration_headers(client=True),
+            json={
+                "protocols": [
+                    MQTT_PROTOCOL_ID_VSS,
+                    MQTT_PROTOCOL_ID_CONNECTION,
+                    MQTT_PROTOCOL_ID_RES,
+                ],
+                "protocolId": MQTT_PROTOCOL_ID_CCU_UPDATE,
+                "carId": vehicle.id or "",
+                "brand": "H",
+            },
+        )
 
-    def _service_hub_vehicle_id_request(self, vehicle: Vehicle) -> dict[str, Any]:
-        return {"json": self._service_hub_vehicle_params(vehicle)}
+    def _read_vehicle_metadata(self, vehicle: Vehicle) -> None:
+        """A missing response must clear a previous registration identity."""
+        vehicle.mqtt_vehicle_id = None
+        data = self._http(
+            "GET",
+            "/api/v3/servicehub/vehicles/metadatalist",
+            headers=self._registration_headers(client=True),
+            params={"carId": vehicle.id or "", "brand": "H"},
+            allow_not_found=True,
+        )
+        if data is not None:
+            vehicle.mqtt_vehicle_id = self._metadata_vehicle_id(data)
 
-    def _service_hub_validate_vehicle_identity(self, vehicle: Vehicle) -> None:
+    def get_push_vehicle_identity(
+        self, token: Token, vehicle: Vehicle
+    ) -> dict[str, Any]:
+        """Resolve metadata, requesting an ID only when the first read is absent."""
+        self._read_vehicle_metadata(vehicle)
+        if not vehicle.mqtt_vehicle_id:
+            data = self._http(
+                "POST",
+                "/api/v3/servicehub/vehicleId",
+                headers=self._registration_headers(client=True),
+                json={"carId": vehicle.id or "", "brand": "H"},
+            )
+            if data is not None:
+                vehicle_id = data.get("vehicleId") or data.get("carId")
+                if vehicle_id:
+                    vehicle.mqtt_vehicle_id = str(vehicle_id)
+            self._read_vehicle_metadata(vehicle)
         if not vehicle.mqtt_vehicle_id:
             raise InvalidAPIResponseError("Japan MQTT vehicle metadata is missing")
+        return {"mqtt_vehicle_id": vehicle.mqtt_vehicle_id}
+
+    def get_push_credentials(self, token: Token) -> tuple[str, str]:
+        """The broker uses the registered client ID and current access token."""
+        return (
+            self._registered_client_id or "",
+            (token.access_token or "").removeprefix("Bearer ").strip(),
+        )
 
     def get_push_topics(self, token: Token, vehicle: Vehicle) -> list[str]:
         if not vehicle.mqtt_vehicle_id or not self._registered_client_id:

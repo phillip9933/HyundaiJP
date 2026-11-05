@@ -18,7 +18,6 @@ from custom_components.hyundai_jp._api.japan_mqtt import (
     JapanMqttSession,
     JapanMqttTransportPool,
 )
-from custom_components.hyundai_jp._api.mqtt_service_hub import ServiceHubProviderMixin
 from custom_components.hyundai_jp._api.Token import Token
 from custom_components.hyundai_jp._api.Vehicle import Vehicle
 
@@ -260,15 +259,42 @@ def test_same_broker_client_is_shared_across_vehicles_with_correlated_subacks(br
     broker[0].disconnect.assert_called_once()
 
 
-def test_japan_inherits_the_shared_registration_implementation():
-    for name in (
-        "get_push_broker_info",
-        "register_push_client",
-        "register_push_vehicle",
-        "get_push_vehicle_identity",
-        "get_push_credentials",
-    ):
-        assert getattr(JapanMqttSession, name) is getattr(ServiceHubProviderMixin, name)
+def test_japan_registration_keeps_wire_identity_and_protocol_order(broker):
+    fleet, helper = manager()
+    try:
+        helper.prepare()
+        host, client, metadata, protocol = helper._http_session.request.call_args_list
+        assert host.args[0] == "GET" and host.args[1].endswith("/device/host")
+        assert client.kwargs["json"] == {
+            "unit": "mobile",
+            "uuid": "synthetic-phone-uuid_BLU",
+        }
+        assert metadata.kwargs["params"] == {"carId": "synthetic-car", "brand": "H"}
+        assert protocol.kwargs["json"] == {
+            "protocols": [
+                "service.phone.vss",
+                "service.phone.connection",
+                "service.phone.res",
+            ],
+            "protocolId": "statesync.vehicle.ccu.update",
+            "carId": "synthetic-car",
+            "brand": "H",
+        }
+        for request in (client, metadata, protocol):
+            assert request.kwargs["headers"]["tid"] == "synthetic-tid"
+        for request in (metadata, protocol):
+            assert request.kwargs["headers"]["client-id"] == "synthetic-broker-client"
+        assert helper.get_push_credentials(fleet.token) == (
+            "synthetic-broker-client",
+            "synthetic-access",
+        )
+        assert helper.get_push_topics(fleet.token, fleet.vehicles["synthetic-car"]) == [
+            "service/phone/_/vss/synthetic-topic-car",
+            "service/phone/_/res/synthetic-broker-client",
+            "service/phone/_/connection/synthetic-topic-car",
+        ]
+    finally:
+        fleet.close()
 
 
 def test_missing_metadata_cannot_reuse_a_previous_registration_identity(broker):
