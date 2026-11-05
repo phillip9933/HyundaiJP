@@ -35,10 +35,12 @@ class HyundaiBluelinkEntity(CoordinatorEntity[JapanDataUpdateCoordinator]):
             # Hyundai may replace its internal vehicle id after an account or
             # subscription migration. The VIN keeps HA attached to the same car.
             identifiers.add((DOMAIN, f"vin:{vin}"))
-        return DeviceInfo(
+        info = DeviceInfo(
             identifiers=identifiers,
             manufacturer="Hyundai Japan",
             model=self.vehicle.model,
             name=self.vehicle.name,
-            serial_number=f"{self.vehicle.VIN}",
         )
+        if vin:
+            info["serial_number"] = vin
+        return info

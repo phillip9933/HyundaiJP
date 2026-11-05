@@ -5,6 +5,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from custom_components import hyundai_jp
 from custom_components.hyundai_jp import services
 from custom_components.hyundai_jp._api import Vehicle
@@ -73,6 +75,15 @@ def test_device_identity_has_its_own_namespace():
         (DOMAIN, "synthetic"),
         (DOMAIN, "vin:SYNTHETIC_TEST_VIN"),
     }
+    assert device["serial_number"] == "SYNTHETIC_TEST_VIN"
+
+
+@pytest.mark.parametrize("vin", [None, ""])
+def test_missing_vin_does_not_create_a_literal_serial_number(vin):
+    vehicle = Vehicle(id="synthetic", name="synthetic", model="IONIQ 5", VIN=vin)
+    device = HyundaiBluelinkEntity(MagicMock(), vehicle).device_info
+    assert "serial_number" not in device
+    assert device["identifiers"] == {(DOMAIN, "synthetic")}
 
 
 def test_runtime_requirements_allow_home_assistant_core_versions():
