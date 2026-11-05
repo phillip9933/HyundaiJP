@@ -28,22 +28,16 @@ class MqttTransport:
 
     def __init__(
         self,
-        on_message: Callable[[str, bytes], None] | None = None,
         on_connect: Callable[[], None] | None = None,
         on_disconnect: Callable[[str], None] | None = None,
         *,
         on_message_details: Callable[[mqtt.MQTTMessage], None] | None = None,
-        on_subscribe_success: Callable[[], None] | None = None,
-        on_subscribe_failure: Callable[[str], None] | None = None,
         on_loop_start_failure: Callable[[], None] | None = None,
     ) -> None:
         self._client: mqtt.Client | None = None
-        self._on_message = on_message
         self._on_connect = on_connect
         self._on_disconnect = on_disconnect
         self._on_message_details = on_message_details
-        self._on_subscribe_success = on_subscribe_success
-        self._on_subscribe_failure = on_subscribe_failure
         self._on_loop_start_failure = on_loop_start_failure
         self._subscription_lock = threading.RLock()
         self._pending_subscriptions: dict[
@@ -130,24 +124,19 @@ class MqttTransport:
         if result != mqtt.MQTT_ERR_SUCCESS and self._on_loop_start_failure:
             self._on_loop_start_failure()
 
-    def disconnect(self, *, stop_loop_first: bool = True) -> None:
-        """Disconnect from the broker and stop the network loop."""
+    def disconnect(self) -> None:
+        """Disconnect before stopping the loop, then release all local state."""
         if self._client:
-            if stop_loop_first:
-                self._client.loop_stop()
+            try:
                 self._client.disconnect()
-            else:
+            finally:
                 try:
-                    self._client.disconnect()
+                    self._client.loop_stop()
                 finally:
-                    try:
-                        self._client.loop_stop()
-                    finally:
-                        self._client = None
-                        self._connected = False
-                        with self._subscription_lock:
-                            self._pending_subscriptions.clear()
-            self._client = None
+                    self._client = None
+                    self._connected = False
+                    with self._subscription_lock:
+                        self._pending_subscriptions.clear()
         self._connected = False
         with self._subscription_lock:
             self._pending_subscriptions.clear()
@@ -162,8 +151,7 @@ class MqttTransport:
     ) -> list[str]:
         """Batch-subscribe the given topics (one SUBSCRIBE).
 
-        QoS defaults to the EU provider's required zero. Other providers can
-        request a different grant and opt into confirmed SUBACK callbacks.
+        Confirm subscriptions using callbacks bound to each request ID.
         Returns the subscribed topic list.
         """
         if not self._client or not self._connected:
@@ -173,8 +161,8 @@ class MqttTransport:
             return []
         if type(qos) is not int or qos not in (0, 1, 2):
             raise ValueError("Invalid MQTT subscription QoS")
-        success = on_success or self._on_subscribe_success
-        failure = on_failure or self._on_subscribe_failure
+        success = on_success
+        failure = on_failure
         with self._subscription_lock:
             try:
                 result, mid = self._client.subscribe([(topic, qos) for topic in topics])
@@ -243,9 +231,7 @@ class MqttTransport:
             self._on_disconnect(reason)
 
     def _on_mqtt_message(self, client: Any, userdata: Any, msg: Any) -> None:
-        """Forward an incoming delivery as raw (topic, payload bytes)."""
-        if self._on_message:
-            self._on_message(msg.topic, msg.payload)
+        """Forward an incoming delivery with its retained-message metadata."""
         if self._on_message_details:
             self._on_message_details(msg)
 

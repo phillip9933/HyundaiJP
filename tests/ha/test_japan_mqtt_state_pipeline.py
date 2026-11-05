@@ -16,7 +16,7 @@ from tests.ha.test_region_operation_serialization import coordinator
 
 
 async def test_delayed_unlock_survives_later_unrelated_packet_and_reaches_activity():
-    api = KiaUvoApiJP(10, 2, "en")
+    api = KiaUvoApiJP()
     api.session.request = Mock(
         side_effect=AssertionError("passive processing must not use HTTP")
     )

@@ -50,7 +50,7 @@ def _parsed_vehicle(state: dict | None) -> Vehicle:
     vehicle = Vehicle(id="v1", name="test", model="test")
     vehicle.ccu_ccs2_protocol_support = 1
     if state is not None:
-        api = KiaUvoApiJP(region=10, brand=2, language="en")
+        api = KiaUvoApiJP()
         api._update_vehicle_properties_ccs2(vehicle, state)
     return vehicle
 

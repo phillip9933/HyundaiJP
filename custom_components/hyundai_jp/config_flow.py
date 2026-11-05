@@ -11,7 +11,6 @@ from homeassistant.config_entries import ConfigEntry, ConfigFlowResult
 from homeassistant.const import (
     CONF_PASSWORD,
     CONF_PIN,
-    CONF_REGION,
     CONF_SCAN_INTERVAL,
     CONF_USERNAME,
 )
@@ -23,7 +22,6 @@ import voluptuous as vol
 from ._api import VehicleManager
 from ._api.exceptions import AuthenticationError
 from .const import (
-    CONF_BRAND,
     CONF_ENABLE_GEOLOCATION_ENTITY,
     CONF_FORCE_REFRESH_INTERVAL,
     CONF_NO_FORCE_REFRESH_HOUR_FINISH,
@@ -37,8 +35,6 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_USE_EMAIL_WITH_GEOCODE_API,
     DOMAIN,
-    HYUNDAI_BRAND,
-    JAPAN_REGION,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -166,15 +162,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if not isinstance(pin, str) or not pin.strip():
                 errors[CONF_PIN] = "invalid_japan_pin"
             else:
-                full_config = {
-                    **user_input,
-                    CONF_REGION: JAPAN_REGION,
-                    CONF_BRAND: HYUNDAI_BRAND,
-                }
+                full_config = dict(user_input)
                 vehicle_manager = VehicleManager(
-                    region=JAPAN_REGION,
-                    brand=HYUNDAI_BRAND,
-                    language=self.hass.config.language,
                     username=full_config[CONF_USERNAME],
                     password=full_config[CONF_PASSWORD],
                     pin=pin,

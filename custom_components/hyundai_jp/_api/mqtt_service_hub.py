@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-import json
 from typing import TYPE_CHECKING, Any
-from urllib.parse import quote
 import uuid
 
 from .Token import Token
@@ -14,7 +11,6 @@ from .Vehicle import Vehicle
 TOPIC_PREFIX_RESULT = "service/phone/_/res/"
 TOPIC_PREFIX_VSS = "service/phone/_/vss/"  # CarStatus.Status
 TOPIC_PREFIX_CONNECTION = "service/phone/_/connection/"  # CarStatus.Connect
-TOPIC_PREFIX_LOCATION = "service/phone/_/location/"  # CarStatus.Location
 
 # Protocol IDs — sent as plain strings in the Service Hub body
 MQTT_PROTOCOL_ID_VSS = "service.phone.vss"
@@ -23,100 +19,13 @@ MQTT_PROTOCOL_ID_RES = "service.phone.res"
 MQTT_PROTOCOL_ID_CCU_UPDATE = "statesync.vehicle.ccu.update"
 
 
-@dataclass
-class PushMessage:
-    """Parsed Service Hub MQTT delivery — the push-message contract shape."""
-
-    topic_group: str  # "CarStatus", "DeviceRemote", "CarOta", ...
-    topic_type: str  # "Status", "Connect", "Res", ...
-    vehicle_id: str  # push-level id (topic infix)
-    payload: dict[str, Any]  # parsed JSON (header/body as delivered)
-    is_status: bool = False
-
-
-def build_car_status_topics(
-    vehicle_id: str, *, result_client_id: str | None = None
-) -> list[str]:
-    """Build CarStatus topics for a vehicle.
-
-    The default excludes results as required by EU brokers; regions supporting
-    result delivery opt in with their registered client id.
-    """
-    topics = [TOPIC_PREFIX_VSS + vehicle_id]
-    if result_client_id is not None:
-        topics.append(TOPIC_PREFIX_RESULT + result_client_id)
-    topics.append(TOPIC_PREFIX_CONNECTION + vehicle_id)
-    return topics
-
-
-def classify_phone_topic(
-    topic: str, *, include_result: bool = False
-) -> tuple[str, str, str] | None:
-    """Classify a phone-family topic into (group, type, infix).
-
-    ``None`` when the topic is not phone-family (that is regional
-    schema; the region classes classify their own topics).
-    """
-    if include_result and topic.startswith(TOPIC_PREFIX_RESULT):
-        return ("CarStatus", "Res", _extract_infix(topic, TOPIC_PREFIX_RESULT))
-    if topic.startswith(TOPIC_PREFIX_VSS):
-        return ("CarStatus", "Status", _extract_infix(topic, TOPIC_PREFIX_VSS))
-    if topic.startswith(TOPIC_PREFIX_CONNECTION):
-        return ("CarStatus", "Connect", _extract_infix(topic, TOPIC_PREFIX_CONNECTION))
-    if topic.startswith(TOPIC_PREFIX_LOCATION):
-        return ("CarStatus", "Location", _extract_infix(topic, TOPIC_PREFIX_LOCATION))
-    return None
-
-
-def _extract_infix(topic: str, prefix: str) -> str:
-    """Extract the vehicle/client id infix from a topic after the prefix.
-
-    The infix is the segment between the prefix and the next '/' (or the
-    whole remainder for a trailing-slash topic).
-    """
-    after_prefix = topic[len(prefix) :]
-    slash_pos = after_prefix.find("/")
-    if slash_pos > 0:
-        return after_prefix[:slash_pos]
-    if after_prefix.endswith("/"):
-        return after_prefix[:-1]
-    return after_prefix
-
-
-def build_service_hub_url_with_params(
-    base: str, path: str, params: dict[str, Any] | None
-) -> str:
-    """Build a Service Hub URL with query params (app-confirmed encoding).
-
-    The server validates parameter values exactly as sent
-    (live-probed): '@' is preserved, not percent-encoded.
-    """
-    full_url = base + path
-    if not params:
-        return full_url
-    safe_chars = "-_.~!$'()*,;=:@/?"
-    parts = [
-        f"{quote(str(k), safe=safe_chars)}={quote(str(v), safe=safe_chars)}"
-        for k, v in params.items()
+def build_car_status_topics(vehicle_id: str, *, result_client_id: str) -> list[str]:
+    """Build Japan's status, command-result and connection subscriptions."""
+    return [
+        TOPIC_PREFIX_VSS + vehicle_id,
+        TOPIC_PREFIX_RESULT + result_client_id,
+        TOPIC_PREFIX_CONNECTION + vehicle_id,
     ]
-    return f"{full_url}?{'&'.join(parts)}"
-
-
-def parse_service_hub_status_message(
-    topic: str, payload: bytes, *, include_result: bool = False
-) -> PushMessage | None:
-    """Parse bounded object deliveries; only status topics signal vehicle data."""
-    classification = classify_phone_topic(topic, include_result=include_result)
-    if classification is None or len(payload) > 2 * 1024 * 1024:
-        return None
-    try:
-        data = json.loads(payload)
-    except ValueError, UnicodeDecodeError, RecursionError:
-        return None
-    if not isinstance(data, dict):
-        return None
-    group, kind, identity = classification
-    return PushMessage(group, kind, identity, data, kind == "Status")
 
 
 class ServiceHubProviderMixin:
@@ -257,7 +166,6 @@ class ServiceHubProviderMixin:
         self._service_hub_validate_vehicle_identity(vehicle)
         return {
             "mqtt_vehicle_id": vehicle.mqtt_vehicle_id,
-            "hu_client_id": vehicle.hu_client_id,
         }
 
     def get_push_credentials(self, token: Token) -> tuple[str, str] | None:

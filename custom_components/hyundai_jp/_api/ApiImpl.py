@@ -1,11 +1,11 @@
 """ApiImpl.py"""
 
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass
 import datetime as dt
 import logging
-from typing import Any, Protocol
+from typing import Any
 
 import requests
 from requests.exceptions import JSONDecodeError
@@ -61,7 +61,6 @@ class WindowRequestOptions:
     front_right: WINDOW_STATE | None = None
     rear_left_curtain: WINDOW_STATE | None = None
     rear_right_curtain: WINDOW_STATE | None = None
-    driver_seat_location: SEAT_LOCATION | None = None  # drvSeatLoc override
 
     def __post_init__(self) -> None:
         """Convert string/int values to WINDOW_STATE enums."""
@@ -175,21 +174,6 @@ class ApiImplSession(requests.Session):
             raise RequestTimeoutError(str(exc)) from exc
 
 
-class PushProvider(Protocol):
-    """Vehicle-scoped Japan push subscription lifecycle."""
-
-    @property
-    def is_connected(self) -> bool: ...
-
-    def start_push(
-        self,
-        status_callback: Callable[[str, str], None] | None,
-        connection_callback: Callable[[bool], None] | None,
-    ) -> bool: ...
-
-    def stop_push(self) -> None: ...
-
-
 class ApiImpl:
     # None preserves consumers that allow all existing regional commands.
     supported_commands: frozenset[str] | None = None
@@ -238,10 +222,6 @@ class ApiImpl:
     def apply_cached_mqtt_state(self, vehicle: Vehicle) -> bool:
         """Apply already-received state without I/O; return whether it changed."""
         return False
-
-    def get_push_provider(self, token: Token, vehicle: Vehicle) -> PushProvider:
-        """Return the vehicle's Japan push session."""
-        raise NotImplementedError("Japan push provider is not implemented")
 
     def check_action_status(
         self,

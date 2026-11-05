@@ -6,7 +6,6 @@ import pytest
 
 from custom_components.hyundai_jp._api.ApiImpl import ApiImpl
 from custom_components.hyundai_jp._api.ApiImplType1 import ApiImplType1
-from custom_components.hyundai_jp._api.Token import Token
 from custom_components.hyundai_jp._api.Vehicle import Vehicle
 from custom_components.hyundai_jp._api.VehicleManager import VehicleManager
 
@@ -15,9 +14,6 @@ from custom_components.hyundai_jp._api.VehicleManager import VehicleManager
 def test_base_interfaces_have_passive_defaults_without_network(api):
     api.session = Mock()
     before = Vehicle(id="synthetic")
-    token = Token(username="synthetic", password="synthetic")
-    with pytest.raises(NotImplementedError):
-        api.get_push_provider(token, before)
     assert api.supported_commands is None
     assert api.get_local_diagnostics() == {}
     assert api.apply_cached_mqtt_state(before) is False

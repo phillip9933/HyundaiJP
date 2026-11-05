@@ -1,4 +1,5 @@
 import datetime as dt
+from importlib import import_module
 
 from custom_components.hyundai_jp._api.ApiImpl import ApiImpl
 from custom_components.hyundai_jp._api.Token import Token
@@ -25,13 +26,11 @@ class DummyApi(ApiImpl):
 def test_check_and_refresh_token_handles_min_datetime(monkeypatch):
     dummy_api = DummyApi()
     monkeypatch.setattr(
-        VehicleManager,
-        "get_implementation_by_region_brand",
-        lambda *args, **kwargs: dummy_api,
+        import_module("custom_components.hyundai_jp._api.VehicleManager"),
+        "KiaUvoApiJP",
+        lambda: dummy_api,
     )
     manager = VehicleManager(
-        region=10,
-        brand=2,
         username="user",
         password="pass",
         pin="1234",
@@ -48,13 +47,11 @@ def test_login_returns_false_without_token(monkeypatch):
     dummy_api = DummyApi()
     monkeypatch.setattr(dummy_api, "login", lambda **kwargs: None)
     monkeypatch.setattr(
-        VehicleManager,
-        "get_implementation_by_region_brand",
-        lambda *args, **kwargs: dummy_api,
+        import_module("custom_components.hyundai_jp._api.VehicleManager"),
+        "KiaUvoApiJP",
+        lambda: dummy_api,
     )
-    manager = VehicleManager(
-        region=10, brand=2, username="user", password="pass", pin="1234"
-    )
+    manager = VehicleManager(username="user", password="pass", pin="1234")
     assert manager.login() is False
 
 
@@ -67,20 +64,12 @@ def test_commands_before_login_are_rejected_without_request(monkeypatch):
 
     dummy_api = Mock(spec=ApiImpl)
     monkeypatch.setattr(
-        VehicleManager, "get_implementation_by_region_brand", lambda *args: dummy_api
+        import_module("custom_components.hyundai_jp._api.VehicleManager"),
+        "KiaUvoApiJP",
+        lambda: dummy_api,
     )
-    manager = VehicleManager(10, 2, "synthetic", "synthetic", "0000")
+    manager = VehicleManager("synthetic", "synthetic", "0000")
     assert manager.token is None
     with pytest.raises(AuthenticationError, match="Sign in"):
         manager.lock("synthetic-car")
     dummy_api.lock_action.assert_not_called()
-
-
-def test_manager_rejects_discarded_regions_and_brands():
-    import pytest
-
-    from custom_components.hyundai_jp._api.exceptions import APIError
-
-    for region, brand in [(1, 2), (3, 2), (10, 1), (10, 3), (0, 2)]:
-        with pytest.raises(APIError, match="Hyundai Japan only"):
-            VehicleManager(region, brand, "synthetic", "synthetic", "0000")

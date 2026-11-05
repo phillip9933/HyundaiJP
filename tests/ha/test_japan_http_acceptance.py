@@ -15,7 +15,7 @@ from tests.ha.test_region_operation_serialization import coordinator
 
 
 def pipeline(body=None, failure=None):
-    api = KiaUvoApiJP(10, 2, "en")
+    api = KiaUvoApiJP()
     helper = Mock()
     helper.request_context = {
         "clientId": "synthetic-client",

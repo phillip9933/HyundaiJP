@@ -31,13 +31,16 @@ def delta(date="20261103020020.000", lock=1):
 
 
 def setup():
-    api = KiaUvoApiJP(10, 2, "en")
+    api = KiaUvoApiJP()
     api.session = Mock()
     api._request = Mock(side_effect=AssertionError("passive reads must not request"))
     api._vehicle_profiles["synthetic"] = {"option": {"drvSeatLoc": "R"}}
     vehicle = Vehicle(id="synthetic", ccu_ccs2_protocol_support=1)
     api._update_vehicle_properties_ccs2(vehicle, state())
     helper = SimpleNamespace(latest_state=None, diagnostics={})
+    helper.drain_state_updates = lambda: (
+        [helper.latest_state] if helper.latest_state is not None else []
+    )
     api._mqtt_sessions[vehicle.id] = ((), helper)
     return api, vehicle, helper
 

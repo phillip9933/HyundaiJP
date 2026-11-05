@@ -4,7 +4,6 @@ from enum import StrEnum
 
 DOMAIN: str = "hyundai_jp"
 
-CONF_BRAND: str = "brand"
 CONF_FORCE_REFRESH_INTERVAL: str = "force_refresh"
 CONF_NO_FORCE_REFRESH_HOUR_START: str = "no_force_refresh_hour_start"
 CONF_NO_FORCE_REFRESH_HOUR_FINISH: str = "no_force_refresh_hour_finish"

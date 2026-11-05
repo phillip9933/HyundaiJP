@@ -1,6 +1,5 @@
 """VehicleManager.py"""
 
-from collections.abc import Callable
 import datetime as dt
 from datetime import timedelta
 import logging
@@ -21,9 +20,8 @@ from .const import (
     VALET_MODE_ACTION,
     VEHICLE_LOCK_ACTION,
 )
-from .exceptions import APIError, AuthenticationError
+from .exceptions import AuthenticationError
 from .KiaUvoApiJP import KiaUvoApiJP
-from .mqtt_push_session import MqttPushSession
 from .svm import SVMDetails
 from .Token import Token
 from .Vehicle import Vehicle
@@ -34,49 +32,33 @@ _LOGGER = logging.getLogger(__name__)
 class VehicleManager:
     def __init__(
         self,
-        region: int,
-        brand: int,
         username: str,
         password: str,
         pin: str,
         geocode_api_enable: bool = False,
         geocode_api_use_email: bool = False,
         token: Token | None = None,
-        language: str = "en",
     ):
-        self.region: int = region
-        self.brand: int = brand
         self.username: str = username
         self.password: str = password
         self.geocode_api_enable: bool = geocode_api_enable
         self.geocode_api_use_email: bool = geocode_api_use_email
         self.pin: str = pin
-        self.language: str = language
 
-        self.api: ApiImpl = self.get_implementation_by_region_brand(
-            self.region, self.brand, self.language
-        )
+        self.api: ApiImpl = KiaUvoApiJP()
 
         self.token: Token | None = token
         self.vehicles: dict[str, Vehicle] = {}
-        # Connection-scoped state; vehicle push identity lives on Vehicle.
-        self._push_session: MqttPushSession | None = None
-        self._push_status_callback: Callable[[str, str], None] | None = None
-        self._push_connection_change_callback: Callable[[bool], None] | None = None
         self._lifecycle_lock = RLock()
         self._closed = False
 
     def close(self) -> None:
-        """Stop push delivery before releasing the adapter's resources."""
+        """Release adapter-owned connections once; safe to repeat."""
         with self._lifecycle_lock:
             if self._closed:
                 return
             self._closed = True
-        try:
-            if self._push_session is not None:
-                self._push_session.close()
-        finally:
-            self.api.close()
+        self.api.close()
 
     def login(self) -> bool:
         """Sign in and initialize Japan vehicles when a token is returned."""
@@ -365,89 +347,3 @@ class VehicleManager:
         return self.api.set_navigation(
             self.get_token(), self.get_vehicle(vehicle_id), poi_list
         )
-
-    # Push glue — the VehicleManager stays the surface; the transport
-    # lifecycle (broker registration, subscriptions, callbacks, reconnect)
-    # lives in MqttPushSession (mqtt_push_session).
-
-    def _ensure_push_session(self) -> None:
-        """Create the push session, wiring manager accessors into it."""
-        if self._push_session is None:
-            self._push_session = MqttPushSession(
-                api=self.api,
-                token_fn=lambda: self.get_token(),
-                refresh_fn=self.check_and_refresh_token,
-                get_vehicle=self.get_vehicle,
-                after_close_fn=lambda: self.api.close(),
-            )
-            self._push_session.set_status_callback(self._push_status_callback)
-            session = self._push_session
-            if self._push_connection_change_callback:
-                session.set_connection_change_callback(
-                    self._push_connection_change_callback
-                )
-
-    def start_push(self, vehicle_id: str) -> bool:
-        """Connect to the push broker and subscribe the vehicle's topics.
-
-        Returns False when push is unavailable (unsupported region, no
-        broker info, rejected registration); ``APIError`` propagates.
-        """
-        with self._lifecycle_lock:
-            if self._closed:
-                return False
-            vehicle = self.vehicles.get(vehicle_id)
-            # False skips outright; None attempts (the flow's metadata refines it).
-            if vehicle is None or vehicle.supports.mqtt_push is False:
-                _LOGGER.debug(
-                    f"{DOMAIN} - Push not supported on {type(self.api).__name__}"
-                )
-                return False
-            self._ensure_push_session()
-            assert self._push_session is not None
-            session = self._push_session
-        try:
-            started = session.ensure_started(vehicle_id)
-        finally:
-            # Startup callbacks can close the manager before registration finishes.
-            if self._closed:
-                try:
-                    session.close()
-                finally:
-                    self.api.close()
-        return started and not self._closed
-
-    def stop_push(self) -> None:
-        """Disconnect push and reset orchestration state."""
-        if self._push_session is not None:
-            self._push_session.stop()
-
-    @property
-    def is_push_connected(self) -> bool:
-        """Whether the push transport is connected."""
-        return self._push_session is not None and self._push_session.is_connected
-
-    def set_push_status_callback(
-        self, callback: Callable[[str, str], None] | None = None
-    ) -> None:
-        """Register a callback for status pushes: (vehicle_id, topic_type)."""
-        self._push_status_callback = callback
-        if self._push_session is not None:
-            self._push_session.set_status_callback(callback)
-
-    def set_push_connection_change_callback(
-        self, callback: Callable[[bool], None] | None = None
-    ) -> None:
-        """Register a callback for push connection changes: (connected: bool)."""
-        self._push_connection_change_callback = callback
-        if self._push_session is not None:
-            self._push_session.set_connection_change_callback(callback)
-
-    @staticmethod
-    def get_implementation_by_region_brand(
-        region: int, brand: int, language: str
-    ) -> ApiImpl:
-        """Construct the only service supported by HyundaiJP."""
-        if region != 10 or brand != 2:
-            raise APIError("HyundaiJP supports Hyundai Japan only")
-        return KiaUvoApiJP(region, brand, language)

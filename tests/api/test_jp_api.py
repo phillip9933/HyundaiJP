@@ -39,18 +39,14 @@ def response(payload, status=200):
 
 @pytest.fixture
 def api():
-    result = KiaUvoApiJP(10, 2, "en")
+    result = KiaUvoApiJP()
     result.session = Mock()
     return result
 
 
-def test_factory_and_capabilities():
-    api = VehicleManager.get_implementation_by_region_brand(10, 2, "en")
-    assert isinstance(api, KiaUvoApiJP)
+def test_japan_capabilities():
+    api = KiaUvoApiJP()
     assert "schedule_charging_and_climate" in api.supported_commands
-    for brand in (1, 3):
-        with pytest.raises(APIError):
-            VehicleManager.get_implementation_by_region_brand(10, brand, "en")
 
 
 @pytest.mark.parametrize(
@@ -626,12 +622,14 @@ def test_profile_camera_capability_survives_vehicle_manager_initialization(
     for vehicle in vehicles:
         api.initialize_vehicle_capabilities(vehicle)
     monkeypatch.setattr(api, "get_vehicles", lambda token: vehicles)
+    from importlib import import_module
+
     monkeypatch.setattr(
-        VehicleManager, "get_implementation_by_region_brand", lambda *args: api
+        import_module("custom_components.hyundai_jp._api.VehicleManager"),
+        "KiaUvoApiJP",
+        lambda: api,
     )
-    manager = VehicleManager(
-        10, 2, "synthetic", "synthetic", "1234", geocode_api_enable=False
-    )
+    manager = VehicleManager("synthetic", "synthetic", "1234", geocode_api_enable=False)
     manager.token = Token(username="synthetic", password="synthetic")
     manager.initialize_vehicles()
     assert manager.vehicles["supported"].supports.svm is True
@@ -1275,18 +1273,6 @@ def test_disconnected_persistent_telemetry_session_is_replaced_before_next_comma
     factory.assert_called_once()
 
 
-def test_japan_populates_type1_urls_and_native_keystream():
-    api = KiaUvoApiJP(10, 2, "ja")
-    assert api.BASE_URL == "ccs-apigw.hyundaijapan.com:8080"
-    assert api.API_URL == "https://" + api.BASE_URL
-    assert api.USER_API_URL == api.API_URL + "/api/v1/user/"
-    assert api.SPA_API_URL == api.API_URL + "/api/v1/spa/"
-    assert api.SPA_API_URL_V2 == api.API_URL + "/api/v2/spa/"
-    assert api.CCSP_SERVICE_ID == api.SERVICE_ID
-    assert api.CFB == api._STAMP_STREAM
-    assert api.LANGUAGE == "ja"
-
-
 def test_push_provider_lookup_reuses_the_authenticated_vehicle_session(api):
     token = Token(
         username="synthetic",
@@ -1301,28 +1287,7 @@ def test_push_provider_lookup_reuses_the_authenticated_vehicle_session(api):
     helper = Mock(closed=False, failed=False)
     helper.request_context = {"clientId": token.mqtt_client_id}
     api._mqtt_sessions[vehicle.id] = (identity, helper)
-    assert api.get_push_provider(token, vehicle) is helper
-    api.session.request.assert_not_called()
-
-
-def test_japan_push_parser_uses_shared_status_and_result_schema(api):
-    provider = api.get_push_provider(
-        Token(
-            username="synthetic",
-            password="synthetic",
-            access_token="Bearer synthetic-access",
-            device_id="synthetic-phone",
-            mqtt_registration_uuid="synthetic-registration",
-        ),
-        Vehicle(id="synthetic"),
-    )
-    status = provider.parse_push_message(
-        "service/phone/_/vss/synthetic", b'{"state": {}}'
-    )
-    assert status is not None and status.is_status
-    result = provider.parse_push_message("service/phone/_/res/client", b'{"state": {}}')
-    assert result is not None and not result.is_status
-    assert provider.parse_push_message("service/phone/_/vss/synthetic", b"[]") is None
+    assert api._mqtt_for_vehicle(token, vehicle) is helper
     api.session.request.assert_not_called()
 
 
@@ -1354,8 +1319,8 @@ def test_authentication_rotation_retires_all_older_vehicle_helpers(api, monkeypa
         ).result(timeout=2)
         assert api._mqtt_for_vehicle(token, Vehicle(id="one")) is replacement
     assert set(api._mqtt_sessions) == {"one"}
-    old_one.close.assert_called_once_with(notify_push=True)
-    old_two.close.assert_called_once_with(notify_push=True)
+    old_one.close.assert_called_once_with()
+    old_two.close.assert_called_once_with()
     factory.assert_called_once()
     api.close()
     replacement.close.assert_called_once_with()
@@ -1378,7 +1343,7 @@ def test_failed_replacement_still_releases_retired_authentication(api, monkeypat
     )
     with pytest.raises(ValueError, match="synthetic construction"):
         api._mqtt_for_vehicle(token, Vehicle(id="one"))
-    previous.close.assert_called_once_with(notify_push=True)
+    previous.close.assert_called_once_with()
     assert api._mqtt_sessions == {}
 
 

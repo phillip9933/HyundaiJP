@@ -37,19 +37,16 @@ class SVMView:
     key: str
     translation_key: str
     icon: str
-    width_index: int  # index into SVMDetails.image_sizes for this segment's width
 
 
-# Order matches the composite layout: FRONT(0), REAR(1), LEFT(2), RIGHT(3),
-# TOP(4). Cameras (F/R/L/R) use image_sizes[2] for width; TOP (bird's-eye)
-# uses image_sizes[4]. The order must stay in sync with the library's
-# svm_image.VIEWS — the crop x-offset is the sum of preceding widths there.
+# Presentation order follows the composite layout. Cropping and segment widths
+# are owned by _api.svm_image; these records only describe the HA image entities.
 SVM_VIEWS: tuple[SVMView, ...] = (
-    SVMView("front", "svm_front", "mdi:car-arrow-right", 2),
-    SVMView("rear", "svm_rear", "mdi:car-arrow-left", 2),
-    SVMView("left", "svm_left", "mdi:car-side", 2),
-    SVMView("right", "svm_right", "mdi:car-side", 2),
-    SVMView("top", "svm_top", "mdi:car-360", 4),
+    SVMView("front", "svm_front", "mdi:car-arrow-right"),
+    SVMView("rear", "svm_rear", "mdi:car-arrow-left"),
+    SVMView("left", "svm_left", "mdi:car-side"),
+    SVMView("right", "svm_right", "mdi:car-side"),
+    SVMView("top", "svm_top", "mdi:car-360"),
 )
 
 
@@ -75,8 +72,8 @@ async def async_setup_entry(
                 _LOGGER.debug(
                     "SVM initial fetch failed for %s", vehicle_id, exc_info=True
                 )
-            for order, view in enumerate(SVM_VIEWS):
-                entities.append(SVMImageEntity(coordinator, vehicle, view, order))
+            for view in SVM_VIEWS:
+                entities.append(SVMImageEntity(coordinator, vehicle, view))
 
     async_add_entities(entities)
 
@@ -91,7 +88,6 @@ class SVMImageEntity(ImageEntity, HyundaiKiaConnectEntity):
         coordinator: JapanDataUpdateCoordinator,
         vehicle: Vehicle,
         view: SVMView,
-        order: int,
     ) -> None:
         """Initialize the SVM image entity."""
         # ImageEntity.__init__ sets up the image-proxy client + access_tokens
@@ -99,7 +95,6 @@ class SVMImageEntity(ImageEntity, HyundaiKiaConnectEntity):
         ImageEntity.__init__(self, coordinator.hass)
         HyundaiKiaConnectEntity.__init__(self, coordinator, vehicle)
         self._view = view
-        self._order = order
         self._attr_translation_key = view.translation_key
         self._attr_icon = view.icon
         self._attr_unique_id = f"{DOMAIN}_{vehicle.id}_svm_{view.key}"

@@ -18,7 +18,6 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from .ApiImpl import PushProvider
 from .ApiImplType1 import ApiImplType1
 from .const import ENGINE_TYPES, ORDER_STATUS, SEAT_STATUS
 from .exceptions import (
@@ -67,29 +66,19 @@ class KiaUvoApiJP(JapanCommandsMixin, JapanSVM, ApiImplType1):
             "set_navigation",
         }
     )
-    BASE_URL = "ccs-apigw.hyundaijapan.com:8080"
-    API_URL = "https://" + BASE_URL
-    USER_API_URL = API_URL + "/api/v1/user/"
-    SPA_API_URL = API_URL + "/api/v1/spa/"
-    SPA_API_URL_V2 = API_URL + "/api/v2/spa/"
-    PUSH_TYPE = "GCM"
+    API_URL = "https://ccs-apigw.hyundaijapan.com:8080"
     SERVICE_ID = "e084c0e4-fcfe-47e3-99c9-36eb93593737"
     APP_ID = "8be122e0-b0d9-40b5-a46e-67b25194ba88"
-    CCSP_SERVICE_ID = SERVICE_ID
     REDIRECT_URI = API_URL + "/api/v1/user/oauth2/redirect"
     # CFB128 keystream for the fixed UUID prefix and a ten-digit epoch.
     # Derived offline from Japan app 1.0.17; no app binary is distributed.
-    _STAMP_STREAM = base64.b64decode(
+    CFB = base64.b64decode(
         "yGeH2vkxepxXpBulEUnI04QXO3CM9oT4E20p+AB8lqHuRZmVEfdQlJmzBX5z5pk="
     )
-    CFB = _STAMP_STREAM
     BASIC_AUTHORIZATION = "Basic ZTA4NGMwZTQtZmNmZS00N2UzLTk5YzktMzZlYjkzNTkzNzM3OjFZcWV4dng3TWxiS3c2YUFvYk1FbDJqQVFvQTBtUVhyV1E1SWpIT083TzRZRHRkRw=="
 
-    def __init__(self, region: int, brand: int, language: str) -> None:
-        if region != 10 or brand != 2:
-            raise APIError("Japan is supported only for Hyundai in region 10")
+    def __init__(self) -> None:
         super().__init__()
-        self.LANGUAGE = language
         self._vehicle_profiles: dict[str, dict[str, Any]] = {}
         self._history_updated_at: dict[str, float] = {}
         self._location_missing_at: dict[str, float] = {}
@@ -124,8 +113,7 @@ class KiaUvoApiJP(JapanCommandsMixin, JapanSVM, ApiImplType1):
                         del self._mqtt_sessions[vehicle_id]
                 existing = self._mqtt_sessions.get(vehicle.id)
                 if existing is not None and (
-                    existing[1].closed is True
-                    or getattr(existing[1], "failed", False) is True
+                    existing[1].closed is True or existing[1].failed is True
                 ):
                     retired.append(existing[1])
                     del self._mqtt_sessions[vehicle.id]
@@ -145,11 +133,8 @@ class KiaUvoApiJP(JapanCommandsMixin, JapanSVM, ApiImplType1):
         finally:
             # Disconnect callbacks may re-enter the manager and factory.
             for previous in retired:
-                previous.close(notify_push=True)
+                previous.close()
         return helper
-
-    def get_push_provider(self, token: Token, vehicle: Vehicle) -> PushProvider:
-        return self._mqtt_for_vehicle(token, vehicle)
 
     @staticmethod
     def _ccs2_observation_time(value: object) -> dt.datetime:
@@ -224,10 +209,7 @@ class KiaUvoApiJP(JapanCommandsMixin, JapanSVM, ApiImplType1):
             self._record_passive_state_result("missing")
             return False
         try:
-            drain = getattr(entry[1], "drain_state_updates", None)
-            observations = drain() if callable(drain) else None
-            if not isinstance(observations, list):
-                observations = [entry[1].latest_state]
+            observations = entry[1].drain_state_updates()
         except AttributeError, IndexError, TypeError, RecursionError:
             self._record_passive_state_result("invalid")
             return False

@@ -58,12 +58,15 @@ async def test_login_fixes_japan_and_hyundai_and_releases_temporary_manager(
         {"username": "Synthetic", "password": "synthetic", "pin": "1234"}
     )
     assert result["type"] == "create_entry"
-    assert constructor.call_args.kwargs["region"] == 10
-    assert constructor.call_args.kwargs["brand"] == 2
+    assert constructor.call_args.kwargs == {
+        "username": "Synthetic",
+        "password": "synthetic",
+        "pin": "1234",
+    }
     data = flow.async_create_entry.call_args.kwargs
     assert data["title"] == "HyundaiJP Synthetic"
-    assert data["data"]["region"] == 10
-    assert data["data"]["brand"] == 2
+    assert "region" not in data["data"]
+    assert "brand" not in data["data"]
     manager.login.assert_called_once()
     manager.close.assert_called_once()
     flow.async_set_unique_id.assert_awaited_once_with(

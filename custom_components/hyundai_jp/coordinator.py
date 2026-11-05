@@ -58,8 +58,6 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_USE_EMAIL_WITH_GEOCODE_API,
     DOMAIN,
-    HYUNDAI_BRAND,
-    JAPAN_REGION,
     OffPeakChargingMode,
 )
 
@@ -105,8 +103,6 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._vehicle_failures: dict[str, int] = {}
 
         self.vehicle_manager = VehicleManager(
-            region=JAPAN_REGION,
-            brand=HYUNDAI_BRAND,
             username=config_entry.data[CONF_USERNAME],
             password=config_entry.data[CONF_PASSWORD],
             pin=config_entry.data[CONF_PIN],
@@ -116,7 +112,6 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             geocode_api_use_email=config_entry.options.get(
                 CONF_USE_EMAIL_WITH_GEOCODE_API, DEFAULT_USE_EMAIL_WITH_GEOCODE_API
             ),
-            language=hass.config.language,
             token=Token.from_dict(config_entry.data.get(CONF_TOKEN, None))
             if config_entry.data.get(CONF_TOKEN, None)
             else None,

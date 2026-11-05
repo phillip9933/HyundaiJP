@@ -106,9 +106,7 @@ def broker(monkeypatch):
 
 
 def manager():
-    result = VehicleManager(
-        region=10, brand=2, username="synthetic", password="synthetic", pin="synthetic"
-    )
+    result = VehicleManager(username="synthetic", password="synthetic", pin="synthetic")
     result.token = Token(
         username="synthetic",
         password="synthetic",
@@ -123,30 +121,22 @@ def manager():
         "synthetic-car": Vehicle(id="synthetic-car", ccu_ccs2_protocol_support=1)
     }
     result.api._request = Mock(return_value={"msgId": "synthetic-action"})
-    helper = result.api.get_push_provider(
+    helper = result.api._mqtt_for_vehicle(
         result.token, result.vehicles["synthetic-car"]
     )
     bootstrap(helper, "synthetic-topic-car")
     return result, helper
 
 
-@pytest.mark.parametrize("push_first", [True, False])
-def test_manager_push_and_commands_share_registration_and_one_connection(
-    broker, push_first
-):
+def test_commands_reuse_registration_and_receive_telemetry(broker):
     fleet, helper = manager()
-    status = Mock()
-    fleet.set_push_status_callback(status)
     try:
-        if push_first:
-            assert fleet.start_push("synthetic-car")
         action = fleet.lock("synthetic-car")
-        if not push_first:
-            assert fleet.start_push("synthetic-car")
+        helper.prepare()  # A second command uses the already prepared session.
         assert len(broker) == 1
         assert helper._http_session.request.call_count == 4
         assert (
-            fleet.api.get_push_provider(fleet.token, fleet.vehicles["synthetic-car"])
+            fleet.api._mqtt_for_vehicle(fleet.token, fleet.vehicles["synthetic-car"])
             is helper
         )
         assert fleet.token.mqtt_registration_uuid == "synthetic-phone-uuid"
@@ -155,109 +145,69 @@ def test_manager_push_and_commands_share_registration_and_one_connection(
         assert (
             fleet.check_action_status("synthetic-car", action) == ORDER_STATUS.ACCEPTED
         )
-        assert fleet.is_push_connected
-
-        broker[0].deliver(
-            helper._topics[0],
-            {
-                "state": {
-                    "Vehicle": {"Date": "20261104010000.000", "DrivingReady": False}
-                }
-            },
-        )
-        status.assert_called_once_with("synthetic-car", "Status")
-        assert helper.drain_state_updates() == [
-            {"Date": "20261104010000.000", "DrivingReady": False}
-        ]
-        fleet.stop_push()
-        assert not fleet.is_push_connected
-        assert helper.is_connected  # API ownership continues serving commands.
+        assert helper.is_connected
+        observation = {"Date": "20261104010000.000", "DrivingReady": False}
+        broker[0].deliver(helper._topics[0], {"state": {"Vehicle": observation}})
+        assert helper.drain_state_updates() == [observation]
         broker[0].disconnect.assert_not_called()
     finally:
-        fleet.stop_push()
         fleet.api.close()
     broker[0].disconnect.assert_called_once()
 
 
-def test_push_only_stop_releases_its_connection_before_api_shutdown(broker):
+def test_api_close_releases_command_connection_and_rejects_late_callbacks(broker):
     fleet, helper = manager()
-    assert fleet.start_push("synthetic-car")
+    fleet.lock("synthetic-car")
     assert helper.is_connected
-    fleet.stop_push()
-    assert not fleet.is_push_connected
-    assert helper.closed
+    fleet.api.close()
+    assert helper.closed and not helper.is_connected
     assert not fleet.api._mqtt_transport_pool._connections
     broker[0].disconnect.assert_called_once()
+    subscribed = len(broker[0].requests)
+    broker[0].on_connect(broker[0], None, {}, 0, None)
+    broker[0].deliver(
+        "service/phone/_/vss/synthetic-topic-car",
+        {"state": {"Vehicle": {"value": "late"}}},
+    )
+    assert helper.drain_state_updates() == []
+    assert len(broker[0].requests) == subscribed
     fleet.api.close()
     broker[0].disconnect.assert_called_once()
 
 
-def test_push_only_stop_during_bootstrap_does_not_create_a_late_connection(broker):
+@pytest.mark.parametrize("blocked_stage", range(4))
+def test_close_during_command_bootstrap_cannot_start_later_stages(
+    broker, blocked_stage
+):
     fleet, helper = manager()
     entered, release = Event(), Event()
     replies = iter(helper._http_session.request.side_effect)
+    calls = []
 
     def request(*args, **kwargs):
-        entered.set()
-        assert release.wait(2), "bootstrap release not signaled"
+        calls.append(args[1])
+        if len(calls) - 1 == blocked_stage:
+            entered.set()
+            assert release.wait(2), "bootstrap release not signaled"
         return next(replies)
 
     helper._http_session.request.side_effect = request
     try:
         with ThreadPoolExecutor(max_workers=1) as executor:
-            pending = executor.submit(fleet.start_push, "synthetic-car")
+            pending = executor.submit(fleet.lock, "synthetic-car")
             assert entered.wait(2), "bootstrap never started"
-            fleet.stop_push()
+            fleet.api.close()
             release.set()
-            assert pending.result(timeout=2) is False
+            with pytest.raises(APIError, match="session is closed"):
+                pending.result(timeout=2)
+        assert len(calls) == blocked_stage + 1
         assert helper.closed
         assert broker == []
-        assert not fleet.is_push_connected
         assert not fleet.api._mqtt_transport_pool._connections
+        fleet.api._request.assert_not_called()
     finally:
         release.set()
-        fleet.stop_push()
         fleet.api.close()
-
-
-def test_stopping_push_preserves_a_command_consumer_already_bootstrapping(broker):
-    fleet, helper = manager()
-    entered, release, push_attached = Event(), Event(), Event()
-    replies = iter(helper._http_session.request.side_effect)
-
-    def request(*args, **kwargs):
-        entered.set()
-        assert release.wait(2), "command bootstrap release not signaled"
-        return next(replies)
-
-    original_consumer = helper._prepare_consumer
-
-    def consumer(kind):
-        if kind == "push":
-            push_attached.set()
-        return original_consumer(kind)
-
-    helper._prepare_consumer = consumer
-    helper._http_session.request.side_effect = request
-    try:
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            command = executor.submit(helper.prepare)
-            assert entered.wait(2), "command consumer never started"
-            push = executor.submit(fleet.start_push, "synthetic-car")
-            assert push_attached.wait(2), "push observer never attached"
-            fleet.stop_push()
-            assert not helper.closed
-            release.set()
-            command.result(timeout=2)
-            assert push.result(timeout=2) is False
-        assert helper.is_connected
-        assert not fleet.is_push_connected
-        broker[0].disconnect.assert_not_called()
-    finally:
-        release.set()
-        fleet.stop_push()
-        fleet.api.close()
-    broker[0].disconnect.assert_called_once()
 
 
 def test_same_broker_client_is_shared_across_vehicles_with_correlated_subacks(broker):
@@ -352,15 +302,13 @@ def test_missing_metadata_cannot_reuse_a_previous_registration_identity(broker):
         helper.close()
 
 
-def test_concurrent_push_and_command_factory_lookup_cannot_orphan_a_helper(
+def test_concurrent_command_and_refresh_lookup_cannot_orphan_a_helper(
     broker, monkeypatch
 ):
     api_module = importlib.import_module(
         "custom_components.hyundai_jp._api.KiaUvoApiJP"
     )
-    fleet = VehicleManager(
-        region=10, brand=2, username="synthetic", password="synthetic", pin="synthetic"
-    )
+    fleet = VehicleManager(username="synthetic", password="synthetic", pin="synthetic")
     fleet.token = Token(
         username="synthetic",
         password="synthetic",
@@ -400,7 +348,7 @@ def test_concurrent_push_and_command_factory_lookup_cannot_orphan_a_helper(
     monkeypatch.setattr(api_module, "JapanMqttSession", constructor)
     try:
         with ThreadPoolExecutor(max_workers=2) as executor:
-            push = executor.submit(fleet.api.get_push_provider, fleet.token, vehicle)
+            push = executor.submit(fleet.api._mqtt_for_vehicle, fleet.token, vehicle)
             assert entered.wait(2), "first helper construction never started"
             command = executor.submit(fleet.api._mqtt_for_vehicle, fleet.token, vehicle)
             assert second_lookup.wait(2), "second lookup did not contend for ownership"
@@ -421,15 +369,13 @@ def test_concurrent_push_and_command_factory_lookup_cannot_orphan_a_helper(
     broker[0].disconnect.assert_called_once()
 
 
-@pytest.mark.parametrize("consumer", ["push", "commands", "both", "refresh_only"])
+@pytest.mark.parametrize("consumer", ["commands", "refresh_only"])
 @pytest.mark.parametrize("outcome", ["success", "failed", "timeout", "request_error"])
 def test_force_refresh_releases_only_its_own_session_use(
     broker, monkeypatch, consumer, outcome
 ):
     fleet, helper = manager()
-    if consumer in ("push", "both"):
-        assert fleet.start_push("synthetic-car")
-    if consumer in ("commands", "both"):
+    if consumer == "commands":
         helper.prepare()
     previous = {"Date": "20261104010000.000", "DrivingReady": True}
     if broker:
@@ -480,13 +426,7 @@ def test_force_refresh_releases_only_its_own_session_use(
             assert helper.drain_state_updates() == (
                 [previous] if outcome == "request_error" else [previous, fresh]
             )
-            assert helper.diagnostics["command_consumer"] == (
-                consumer in ("commands", "both")
-            )
-            assert helper.diagnostics["push_consumer"] == (consumer in ("push", "both"))
-            assert fleet.is_push_connected == (consumer in ("push", "both"))
-            if fleet._push_session is not None:
-                assert fleet._push_session._reconnect_cancel is None
+            assert helper.diagnostics["command_consumer"]
             broker[0].disconnect.assert_not_called()
         assert helper.diagnostics["refresh_consumers"] == 0
         refresh_diagnostics = fleet.api.get_local_diagnostics()["last_refresh"]
@@ -508,7 +448,6 @@ def test_force_refresh_releases_only_its_own_session_use(
             )
         assert "synthetic" not in repr(fleet.api.get_local_diagnostics())
     finally:
-        fleet.stop_push()
         fleet.api.close()
     broker[0].disconnect.assert_called_once()
 
@@ -574,20 +513,19 @@ def test_refresh_bootstrap_interrupted_by_api_close_cannot_reconnect(broker):
         fleet.api.close()
 
 
-def test_stopping_push_keeps_an_active_refresh_until_it_exits(broker):
+def test_api_close_invalidates_an_active_refresh_without_reopening_it(broker):
     fleet, helper = manager()
     try:
-        assert fleet.start_push("synthetic-car")
         with helper.refresh_session():
-            fleet.stop_push()
             assert helper.is_connected
-            assert not helper.closed
             assert helper.diagnostics["refresh_consumers"] == 1
-            broker[0].disconnect.assert_not_called()
-        assert helper.closed
+            fleet.api.close()
+            assert helper.closed and not helper.is_connected
+            assert helper.diagnostics["refresh_consumers"] == 0
+            broker[0].disconnect.assert_called_once()
+        assert not fleet.api._mqtt_transport_pool._connections
         broker[0].disconnect.assert_called_once()
     finally:
-        fleet.stop_push()
         fleet.api.close()
 
 
@@ -612,7 +550,7 @@ def test_repeated_refreshes_retire_only_their_tracking_on_a_persistent_session(b
     fleet, helper = manager()
     helper.MAX_RESULTS = 2
     try:
-        assert fleet.start_push("synthetic-car")
+        helper.prepare()
         helper.track("other-action")
         broker[0].deliver(helper._topics[1], {"sid": "other-action", "res-msg": "S"})
         actions = []
@@ -652,5 +590,4 @@ def test_repeated_refreshes_retire_only_their_tracking_on_a_persistent_session(b
             helper.track(last_action)
         broker[0].disconnect.assert_not_called()
     finally:
-        fleet.stop_push()
         fleet.api.close()

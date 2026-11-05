@@ -44,16 +44,6 @@ class VehicleSupports:
     valet_mode: bool | None = None
     # VehicleManager.get_svm_details / request_svm_capture
     svm: bool | None = None
-    # Service Hub registration + the receive-only MQTT broker
-    mqtt_push: bool | None = None
-    # device.closeremote.precondition protocol (push metadata hu entry)
-    hvac_close_remote: bool | None = None
-    # device.closeremote.media.vehiclestatus protocol
-    media_close_remote: bool | None = None
-    # vehicle.ota.otaprogress protocol
-    ota_progress: bool | None = None
-    # vehicle.ota.scheduleupdate protocol
-    schedule_update: bool | None = None
 
 
 @dataclass
@@ -64,11 +54,8 @@ class Vehicle:
     registration_date: str | None = None
     year: int | None = None
     VIN: str | None = None
-    key: str | None = None
     # EU or Type 1 version:
     ccu_ccs2_protocol_support: int | None = None
-    # Hyundai USA:
-    generation: int | None = None
     # Not part of the API, enabled in our library for scanning.
     enabled: bool = True
     supports: VehicleSupports = field(default_factory=VehicleSupports)
@@ -76,11 +63,9 @@ class Vehicle:
     # Shared (EV/PHEV/HEV/IC)
     # General
     _total_driving_range: float | None = None
-    _total_driving_range_value: float | None = None
     _total_driving_range_unit: str | None = None
 
     _odometer: float | None = None
-    _odometer_value: float | None = None
     _odometer_unit: str | None = None
 
     _geocode_address: str | None = None
@@ -96,23 +81,15 @@ class Vehicle:
     dtc_count: int | None = None
     dtc_descriptions: dict[str, Any] | None = None
 
-    maintenance_report_last_id: int | None = None
-    maintenance_report_date: str | None = None
-    maintenance_report_odometer: float | None = None
-    maintenance_report_odometer_unit: str | None = None
-    maintenance_report_systems: dict[str, Any] | None = None
-
     smart_key_battery_warning_is_on: bool | None = None
     washer_fluid_warning_is_on: bool | None = None
     brake_fluid_warning_is_on: bool | None = None
 
     _outside_temperature: float | None = None
-    _outside_temperature_value: float | None = None
     _outside_temperature_unit: str | None = None
 
     # Climate
     _air_temperature: float | None = None
-    _air_temperature_value: float | None = None
     _air_temperature_unit: str | None = None
 
     air_control_is_on: bool | None = None
@@ -148,21 +125,9 @@ class Vehicle:
     # Valet Status
     valet_mode_active: bool | None = None
 
-    # Software version (GSPA device-info read)
-    software_version: str | None = None
-    ota_update_available: bool | None = None
-
-    # Cached-failure flags for GSPA query endpoints (reset by force refresh).
-    # _ota_checked: True after the first OTA check (no re-check until force
-    # refresh); _valet_failed: pessimistic circuit — True while a valet read
-    # is in flight or after a failure, reset to False on success.
-    _ota_checked: bool = False
-    _valet_failed: bool = False
-
     # Push identity (per-vehicle level). mqtt_vehicle_id = topic infix,
     # distinct from Token.mqtt_client_id (the device-level registration id).
     mqtt_vehicle_id: str | None = None
-    hu_client_id: str | None = None
 
     # Tire Pressure
     tire_pressure_all_warning_is_on: bool | None = None
@@ -193,21 +158,14 @@ class Vehicle:
 
     # Service Data
     _next_service_distance: float | None = None
-    _next_service_distance_value: float | None = None
     _next_service_distance_unit: str | None = None
     _last_service_distance: float | None = None
-    _last_service_distance_value: float | None = None
     _last_service_distance_unit: str | None = None
 
     # Location
     _location_latitude: float | None = None
     _location_longitude: float | None = None
     _location_last_set_time: datetime.datetime | None = None
-    # True after an attempt to fetch the (still unknown) location. In-memory
-    # like the coordinates themselves: a restart/reload starts a fresh
-    # attempt. Bounds the unknown-location fetch to one try per session so a
-    # persistently failing Find-My-Car response cannot re-run on every poll.
-    _location_fetch_attempted: bool = False
 
     # EV fields (EV/PHEV)
 
@@ -253,12 +211,6 @@ class Vehicle:
     ev_charge_complete_alarm_before_20min: bool | None = None
     ev_charge_complete_alarm_before_30min: bool | None = None
     ev_charge_complete_alarm_off: bool | None = None
-    # Expected charge window (GSPA ChargingInformation.ExpectedTime) —
-    # hour/min guarded by ccs2_reservation_time_or_none (Day semantics
-    # unconfirmed, not exposed).
-    ev_charge_expected_start_time: datetime.time | None = None
-    ev_charge_expected_end_time: datetime.time | None = None
-
     # Average fuel economy (Drivetrain.FuelSystem.AverageFuelEconomy);
     # values raw, Unit enum not translated (differs per powertrain).
     average_fuel_economy_accumulated: float | None = None
@@ -305,15 +257,12 @@ class Vehicle:
     ev_battery_chiller_rpm: int | None = None
     ev_battery_heating_state: bool | None = None
     _ev_battery_water_temperature: int | None = None
-    _ev_battery_water_temperature_value: int | None = None
     _ev_battery_water_temperature_unit: str | None = None
 
     _ev_battery_temperature_min: int | None = None
-    _ev_battery_temperature_min_value: int | None = None
     _ev_battery_temperature_min_unit: str | None = None
 
     _ev_battery_temperature_max: int | None = None
-    _ev_battery_temperature_max_value: int | None = None
     _ev_battery_temperature_max_unit: str | None = None
     ev_battery_winter_mode: bool | None = None
     ev_battery_soh_percentage: int | None = None
@@ -326,33 +275,26 @@ class Vehicle:
     ev_connector_fastening_state: CONNECTOR_FASTENING_STATE | None = None
 
     _ev_driving_range: float | None = None
-    _ev_driving_range_value: float | None = None
     _ev_driving_range_unit: str | None = None
 
     _ev_estimated_current_charge_duration: int | None = None
-    _ev_estimated_current_charge_duration_value: int | None = None
     _ev_estimated_current_charge_duration_unit: str | None = None
 
     _ev_estimated_fast_charge_duration: int | None = None
-    _ev_estimated_fast_charge_duration_value: int | None = None
     _ev_estimated_fast_charge_duration_unit: str | None = None
 
     _ev_estimated_portable_charge_duration: int | None = None
-    _ev_estimated_portable_charge_duration_value: int | None = None
     _ev_estimated_portable_charge_duration_unit: str | None = None
 
     ev_battery_precondition_enabled: bool | None = None
 
     _ev_estimated_station_charge_duration: int | None = None
-    _ev_estimated_station_charge_duration_value: int | None = None
     _ev_estimated_station_charge_duration_unit: str | None = None
 
     _ev_target_range_charge_AC: float | None = None
-    _ev_target_range_charge_AC_value: float | None = None
     _ev_target_range_charge_AC_unit: str | None = None
 
     _ev_target_range_charge_DC: float | None = None
-    _ev_target_range_charge_DC_value: float | None = None
     _ev_target_range_charge_DC_unit: str | None = None
 
     ev_power_consumption_battery_cooling: float | None = None
@@ -372,11 +314,9 @@ class Vehicle:
     ev_second_departure_climate_enabled: bool | None = None
 
     _ev_first_departure_climate_temperature: float | None = None
-    _ev_first_departure_climate_temperature_value: float | None = None
     _ev_first_departure_climate_temperature_unit: str | None = None
 
     _ev_second_departure_climate_temperature: float | None = None
-    _ev_second_departure_climate_temperature_value: float | None = None
     _ev_second_departure_climate_temperature_unit: str | None = None
 
     ev_first_departure_climate_defrost: bool | None = None
@@ -390,7 +330,6 @@ class Vehicle:
 
     # IC fields (PHEV/HEV/IC)
     _fuel_driving_range: float | None = None
-    _fuel_driving_range_value: float | None = None
     _fuel_driving_range_unit: str | None = None
     fuel_level: float | None = None
 
@@ -421,7 +360,6 @@ class Vehicle:
 
     @total_driving_range.setter
     def total_driving_range(self, value: Any) -> None:
-        self._total_driving_range_value = value[0]
         self._total_driving_range = value[0]
         if value[1] is not None:
             self._total_driving_range_unit = value[1]
@@ -458,7 +396,6 @@ class Vehicle:
 
     @next_service_distance.setter
     def next_service_distance(self, value: Any) -> None:
-        self._next_service_distance_value = value[0]
         self._next_service_distance = value[0]
         if value[1] is not None:
             self._next_service_distance_unit = value[1]
@@ -469,7 +406,6 @@ class Vehicle:
 
     @last_service_distance.setter
     def last_service_distance(self, value: Any) -> None:
-        self._last_service_distance_value = value[0]
         self._last_service_distance = value[0]
         if value[1] is not None:
             self._last_service_distance_unit = value[1]
@@ -547,7 +483,6 @@ class Vehicle:
     @odometer.setter
     def odometer(self, value: Any) -> None:
         float_value = get_float(value[0])
-        self._odometer_value = float_value
         self._odometer = float_value
         if value[1] is not None:
             self._odometer_unit = value[1]
@@ -562,7 +497,6 @@ class Vehicle:
 
     @outside_temperature.setter
     def outside_temperature(self, value: Any) -> None:
-        self._outside_temperature_value = value[0]
         self._outside_temperature = float_or_none(value[0])
         if value[1] is not None:
             self._outside_temperature_unit = value[1]
@@ -573,7 +507,6 @@ class Vehicle:
 
     @air_temperature.setter
     def air_temperature(self, value: Any) -> None:
-        self._air_temperature_value = value[0]
         self._air_temperature = float_or_none(value[0])
         if value[1] is not None:
             self._air_temperature_unit = value[1]
@@ -584,7 +517,6 @@ class Vehicle:
 
     @ev_battery_water_temperature.setter
     def ev_battery_water_temperature(self, value: Any) -> None:
-        self._ev_battery_water_temperature_value = value[0]
         self._ev_battery_water_temperature = value[0]
         if value[1] is not None:
             self._ev_battery_water_temperature_unit = value[1]
@@ -599,7 +531,6 @@ class Vehicle:
 
     @ev_battery_temperature_min.setter
     def ev_battery_temperature_min(self, value: Any) -> None:
-        self._ev_battery_temperature_min_value = value[0]
         self._ev_battery_temperature_min = value[0]
         if value[1] is not None:
             self._ev_battery_temperature_min_unit = value[1]
@@ -614,7 +545,6 @@ class Vehicle:
 
     @ev_battery_temperature_max.setter
     def ev_battery_temperature_max(self, value: Any) -> None:
-        self._ev_battery_temperature_max_value = value[0]
         self._ev_battery_temperature_max = value[0]
         if value[1] is not None:
             self._ev_battery_temperature_max_unit = value[1]
@@ -629,7 +559,6 @@ class Vehicle:
 
     @ev_driving_range.setter
     def ev_driving_range(self, value: Any) -> None:
-        self._ev_driving_range_value = value[0]
         self._ev_driving_range = value[0]
         if value[1] is not None:
             self._ev_driving_range_unit = value[1]
@@ -644,7 +573,6 @@ class Vehicle:
 
     @ev_estimated_current_charge_duration.setter
     def ev_estimated_current_charge_duration(self, value: Any) -> None:
-        self._ev_estimated_current_charge_duration_value = value[0]
         self._ev_estimated_current_charge_duration = value[0]
         if value[1] is not None:
             self._ev_estimated_current_charge_duration_unit = value[1]
@@ -655,7 +583,6 @@ class Vehicle:
 
     @ev_estimated_fast_charge_duration.setter
     def ev_estimated_fast_charge_duration(self, value: Any) -> None:
-        self._ev_estimated_fast_charge_duration_value = value[0]
         self._ev_estimated_fast_charge_duration = value[0]
         if value[1] is not None:
             self._ev_estimated_fast_charge_duration_unit = value[1]
@@ -666,7 +593,6 @@ class Vehicle:
 
     @ev_estimated_portable_charge_duration.setter
     def ev_estimated_portable_charge_duration(self, value: Any) -> None:
-        self._ev_estimated_portable_charge_duration_value = value[0]
         self._ev_estimated_portable_charge_duration = value[0]
         if value[1] is not None:
             self._ev_estimated_portable_charge_duration_unit = value[1]
@@ -677,7 +603,6 @@ class Vehicle:
 
     @ev_estimated_station_charge_duration.setter
     def ev_estimated_station_charge_duration(self, value: Any) -> None:
-        self._ev_estimated_station_charge_duration_value = value[0]
         self._ev_estimated_station_charge_duration = value[0]
         if value[1] is not None:
             self._ev_estimated_station_charge_duration_unit = value[1]
@@ -688,7 +613,6 @@ class Vehicle:
 
     @ev_target_range_charge_AC.setter
     def ev_target_range_charge_AC(self, value: Any) -> None:
-        self._ev_target_range_charge_AC_value = value[0]
         self._ev_target_range_charge_AC = value[0]
         if value[1] is not None:
             self._ev_target_range_charge_AC_unit = value[1]
@@ -703,7 +627,6 @@ class Vehicle:
 
     @ev_target_range_charge_DC.setter
     def ev_target_range_charge_DC(self, value: Any) -> None:
-        self._ev_target_range_charge_DC_value = value[0]
         self._ev_target_range_charge_DC = value[0]
         if value[1] is not None:
             self._ev_target_range_charge_DC_unit = value[1]
@@ -724,7 +647,6 @@ class Vehicle:
         else:
             val = value
             unit = None
-        self._ev_first_departure_climate_temperature_value = val
         try:
             self._ev_first_departure_climate_temperature = (
                 float(val) if val is not None else None
@@ -750,7 +672,6 @@ class Vehicle:
         else:
             val = value
             unit = None
-        self._ev_second_departure_climate_temperature_value = val
         try:
             self._ev_second_departure_climate_temperature = (
                 float(val) if val is not None else None
@@ -770,7 +691,6 @@ class Vehicle:
 
     @fuel_driving_range.setter
     def fuel_driving_range(self, value: Any) -> None:
-        self._fuel_driving_range_value = value[0]
         self._fuel_driving_range = value[0]
         if value[1] is not None:
             self._fuel_driving_range_unit = value[1]

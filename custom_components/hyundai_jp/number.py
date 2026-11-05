@@ -17,7 +17,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from ._api import Vehicle
-from .const import DOMAIN, DYNAMIC_UNIT
+from .const import DOMAIN
 from .coordinator import JapanDataUpdateCoordinator
 from .entity import HyundaiKiaConnectEntity
 
@@ -167,26 +167,3 @@ class HyundaiKiaConnectNumber(NumberEntity, HyundaiKiaConnectEntity):
             await self.coordinator.async_set_v2l_limit(self.vehicle.id, int(value))
 
         self.async_write_ha_state()
-
-    @property
-    def native_min_value(self) -> float:
-        """Return the minimum value from the entity description."""
-        return cast(float, self.entity_description.native_min_value)
-
-    @property
-    def native_max_value(self) -> float:
-        """Return the maximum value from the entity description."""
-        return cast(float, self.entity_description.native_max_value)
-
-    @property
-    def native_step(self) -> float | None:
-        """Return the step value from the entity description."""
-        return self.entity_description.native_step
-
-    @property
-    def native_unit_of_measurement(self) -> str | None:
-        """Return the unit the value was reported in by the vehicle."""
-        if self.entity_description.native_unit_of_measurement == DYNAMIC_UNIT:
-            return cast(str | None, getattr(self.vehicle, self._key + "_unit"))
-        else:
-            return self.entity_description.native_unit_of_measurement

@@ -98,7 +98,9 @@ def test_subscribe_batch_qos0():
 
 def test_on_message_receives_raw_topic_payload():
     got: list[tuple[str, bytes]] = []
-    t = MqttTransport(on_message=lambda topic, payload: got.append((topic, payload)))
+    t = MqttTransport(
+        on_message_details=lambda msg: got.append((msg.topic, msg.payload))
+    )
 
     class _Msg:
         topic = "service/phone/_/vss/v1/"

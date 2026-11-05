@@ -33,7 +33,7 @@ def response(body, status=200):
 
 @pytest.fixture
 def setup():
-    api = KiaUvoApiJP(10, 2, "en")
+    api = KiaUvoApiJP()
     api.session = Mock()
     helper = Mock()
     helper.request_context = {

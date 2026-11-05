@@ -6,7 +6,7 @@ from custom_components.hyundai_jp._api.KiaUvoApiJP import KiaUvoApiJP
 
 
 def test_local_diagnostics_are_bounded_and_do_not_serialize_authentication():
-    api = KiaUvoApiJP(10, 2, "en")
+    api = KiaUvoApiJP()
     helper = SimpleNamespace(diagnostics={"closed": True, "result_messages": 0})
     api._mqtt_sessions = {
         str(index): (("synthetic-secret-token",), helper) for index in range(12)
@@ -19,7 +19,7 @@ def test_local_diagnostics_are_bounded_and_do_not_serialize_authentication():
 
 
 def test_local_diagnostics_before_any_capture_or_connection():
-    api = KiaUvoApiJP(10, 2, "en")
+    api = KiaUvoApiJP()
     api._mqtt_sessions = {}
     assert api.get_local_diagnostics() == {
         "mqtt_sessions": [],

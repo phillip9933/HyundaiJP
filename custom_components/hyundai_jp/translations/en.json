@@ -544,12 +544,6 @@
       "location_last_updated_at": {
         "name": "Location Last Updated"
       },
-      "ev_v2l_max_power": {
-        "name": "V2L max power"
-      },
-      "ev_v2l_target_soc": {
-        "name": "V2L target SoC"
-      },
       "tire_pressure_front_left": {
         "name": "Tire Pressure - Front Left"
       },
@@ -650,12 +644,6 @@
       },
       "ev_charge_port_door_is_open": {
         "name": "EV Charge Port"
-      },
-      "ev_first_departure_enabled": {
-        "name": "EV Scheduled Departure 1"
-      },
-      "ev_second_departure_enabled": {
-        "name": "EV Scheduled Departure 2"
       },
       "front_left_door_is_locked": {
         "name": "Front Left Door Lock"
@@ -785,24 +773,6 @@
       },
       "windshield_front_heater_is_on": {
         "name": "Windshield Heater"
-      },
-      "ev_first_departure_climate_defrost": {
-        "name": "First departure defrost"
-      },
-      "ev_first_departure_climate_enabled": {
-        "name": "First departure climate"
-      },
-      "ev_second_departure_climate_defrost": {
-        "name": "Second departure defrost"
-      },
-      "ev_second_departure_climate_enabled": {
-        "name": "Second departure climate"
-      },
-      "ev_off_peak_charge_only_enabled": {
-        "name": "Off-peak charge only"
-      },
-      "ev_schedule_charge_enabled": {
-        "name": "Scheduled charging"
       },
       "ev_v2l_status": {
         "name": "V2L status"

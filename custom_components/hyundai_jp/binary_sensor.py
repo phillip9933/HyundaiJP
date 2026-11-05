@@ -651,10 +651,6 @@ class HyundaiKiaConnectBinarySensor(BinarySensorEntity, HyundaiKiaConnectEntity)
     @property
     def icon(self) -> str | None:
         """Return the icon to use in the frontend, if any."""
-        if (
-            self.entity_description.on_icon == self.entity_description.off_icon
-        ) is None:
-            return BinarySensorEntity.icon.__get__(self)
         return (
             self.entity_description.on_icon
             if self.is_on

@@ -141,6 +141,9 @@ async def test_token_meta_has_no_secrets() -> None:
     assert "device_id" not in token_meta
     assert token_meta["device_present"] is True
     assert "valid_until" in token_meta
+    assert token_meta["ccs_valid_until"] is None
+    assert token_meta["mqtt_broker_host"] is None
+    assert token_meta["mqtt_broker_port"] is None
 
 
 @pytest.mark.asyncio
@@ -200,7 +203,7 @@ async def test_bundled_version_requires_no_installed_api_package(monkeypatch):
 async def test_local_protocol_diagnostics_are_passive_and_off_event_loop() -> None:
     from custom_components.hyundai_jp._api.KiaUvoApiJP import KiaUvoApiJP
 
-    api = KiaUvoApiJP(region=10, brand=2, language="en")
+    api = KiaUvoApiJP()
     api.session = MagicMock()
     api._japan_svm_cache = {"SYNTHETIC_PRIVATE_VEHICLE": object()}
     helper = SimpleNamespace(

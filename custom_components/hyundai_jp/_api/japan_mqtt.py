@@ -15,8 +15,7 @@ import json
 import re
 import ssl
 import threading
-from types import TracebackType
-from typing import Any, Literal, Self, cast, overload
+from typing import Any, Literal, cast, overload
 
 import paho.mqtt.client as mqtt
 import requests
@@ -32,12 +31,7 @@ from .exceptions import (
     ServiceTemporaryUnavailable,
 )
 from .mqtt_client import MqttTransport
-from .mqtt_service_hub import (
-    PushMessage,
-    ServiceHubProviderMixin,
-    build_car_status_topics,
-    parse_service_hub_status_message,
-)
+from .mqtt_service_hub import ServiceHubProviderMixin, build_car_status_topics
 from .Token import Token
 from .Vehicle import Vehicle
 
@@ -81,7 +75,7 @@ class JapanMqttTransportPool:
             if self._connections.get(connection.key) is connection:
                 del self._connections[connection.key]
             connection.failed = True
-        connection.transport.disconnect(stop_loop_first=False)
+        connection.transport.disconnect()
 
 
 class _JapanConnection:
@@ -201,9 +195,6 @@ class JapanMqttSession(ServiceHubProviderMixin):
         self._transport: MqttTransport | None = None
         self._transport_pool = transport_pool or JapanMqttTransportPool()
         self._connection: _JapanConnection | None = None
-        self._status_callback: Callable[[str, str], None] | None = None
-        self._connection_callback: Callable[[bool], None] | None = None
-        self._reported_connection: bool | None = None
         self._consumer_leases: set[object] = set()
         self._condition = threading.Condition()
         self._prepare_lock = threading.Lock()
@@ -322,59 +313,10 @@ class JapanMqttSession(ServiceHubProviderMixin):
             vehicle.mqtt_vehicle_id, result_client_id=self._registered_client_id
         )
 
-    def parse_push_message(self, topic: str, payload: bytes) -> PushMessage | None:
-        if self._topics and topic not in self._topics:
-            return None
-        return parse_service_hub_status_message(topic, payload, include_result=True)
-
     @property
     def is_connected(self) -> bool:
         with self._condition:
             return self._ready and self._error is None and not self._closed
-
-    def set_status_callback(self, callback: Callable[[str, str], None] | None) -> None:
-        with self._condition:
-            self._status_callback = callback
-
-    def set_connection_change_callback(
-        self, callback: Callable[[bool], None] | None
-    ) -> None:
-        with self._condition:
-            self._connection_callback = callback
-            self._reported_connection = None
-
-    def start_push(
-        self,
-        status_callback: Callable[[str, str], None] | None = None,
-        connection_callback: Callable[[bool], None] | None = None,
-    ) -> bool:
-        self.set_status_callback(status_callback)
-        self.set_connection_change_callback(connection_callback)
-        self._prepare_consumer("push")
-        self._report_connection(True)
-        return self.is_connected
-
-    def stop_push(self) -> None:
-        """Release push ownership, retaining only an existing command consumer."""
-        with self._condition:
-            self._consumer_leases.discard("push")
-            self._status_callback = None
-            self._connection_callback = None
-            self._reported_connection = None
-            close = not self._consumer_leases
-            if close:
-                self._closed = True
-        if close:
-            self.close()
-
-    def _report_connection(self, connected: bool) -> None:
-        with self._condition:
-            callback = self._connection_callback
-            if callback is None or self._reported_connection is connected:
-                return
-            self._reported_connection = connected
-        with suppress(Exception):
-            callback(connected)
 
     @overload
     def _http(
@@ -668,7 +610,6 @@ class JapanMqttSession(ServiceHubProviderMixin):
                 self._last_status = "connection_error"
             self._ready = False
             self._condition.notify_all()
-        self._report_connection(False)
 
     def _on_subscribe(self) -> None:
         with self._condition:
@@ -677,7 +618,6 @@ class JapanMqttSession(ServiceHubProviderMixin):
             self._request_context = dict(self._pending_context)
             self._ready = True
             self._condition.notify_all()
-        self._report_connection(True)
 
     def _on_subscribe_failure(self, reason: str) -> None:
         with self._condition:
@@ -692,7 +632,6 @@ class JapanMqttSession(ServiceHubProviderMixin):
     def _on_message(
         self, client: object, userdata: object, message: mqtt.MQTTMessage
     ) -> None:
-        status_received = False
         with self._condition:
             self._diagnostics["messages_received"] += 1
             if message.retain:
@@ -741,7 +680,6 @@ class JapanMqttSession(ServiceHubProviderMixin):
                 if isinstance(state, dict):
                     self._latest_state = deepcopy(state)
                     self._state_updates.append(deepcopy(state))
-                    status_received = True
             elif message.topic == self._topics[1]:
                 self._diagnostics["result_messages"] += 1
                 sid = payload.get("sid")
@@ -779,10 +717,6 @@ class JapanMqttSession(ServiceHubProviderMixin):
             else:
                 self._diagnostics["other_topic_messages"] += 1
             self._condition.notify_all()
-            callback = self._status_callback
-        if status_received and callback is not None:
-            with suppress(Exception):
-                callback(self._vehicle_id, "Status")
 
     def track(self, action_id: str) -> None:
         """Track the HTTP acknowledgement; already received results are retained."""
@@ -875,7 +809,6 @@ class JapanMqttSession(ServiceHubProviderMixin):
                 "closed": self._closed,
                 "pending_state_updates": len(self._state_updates),
                 "command_consumer": "commands" in self._consumer_leases,
-                "push_consumer": "push" in self._consumer_leases,
                 "tracked_actions": len(self._tracked),
                 "refresh_consumers": sum(
                     type(consumer) is object for consumer in self._consumer_leases
@@ -918,14 +851,9 @@ class JapanMqttSession(ServiceHubProviderMixin):
             self._state_updates.clear()
             return updates
 
-    def close(self, *, notify_push: bool = False) -> None:
+    def close(self) -> None:
         """Stop network activity and release all session data; safe to repeat."""
         with self._condition:
-            callback = (
-                self._connection_callback
-                if notify_push and self._reported_connection is not False
-                else None
-            )
             self._closed = True
             self._consumer_leases.clear()
             self._ready = False
@@ -937,26 +865,8 @@ class JapanMqttSession(ServiceHubProviderMixin):
             self._pending_context.clear()
             connection, self._connection = self._connection, None
             self._transport = None
-            self._status_callback = None
-            self._connection_callback = None
-            self._reported_connection = False
             self._condition.notify_all()
         if connection is not None:
             with suppress(Exception):
                 self._transport_pool.release(connection, self)
         self._http_session.close()
-        if callback is not None:
-            with suppress(Exception):
-                callback(False)
-
-    def __enter__(self) -> Self:
-        self.prepare()
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_value: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
-        self.close()

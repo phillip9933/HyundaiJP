@@ -86,10 +86,10 @@ def test_disconnected_and_empty_subscriptions_are_not_sent(client):
 @pytest.mark.parametrize("qos", [0, 1, 2])
 def test_opt_in_confirmation_requires_matching_mid_count_and_requested_qos(client, qos):
     success, failure = Mock(), Mock()
-    transport = connect(
-        client, on_subscribe_success=success, on_subscribe_failure=failure
+    transport = connect(client)
+    transport.subscribe(
+        ["synthetic/a", "synthetic/b"], qos=qos, on_success=success, on_failure=failure
     )
-    transport.subscribe(["synthetic/a", "synthetic/b"], qos=qos)
     success.assert_not_called()
     failure.assert_not_called()
     suback(client, [qos, qos], mid=99)
@@ -104,10 +104,10 @@ def test_opt_in_confirmation_requires_matching_mid_count_and_requested_qos(clien
 @pytest.mark.parametrize("grants", [[], [1], [1, 128], [1, 1, 1], [1, 2]])
 def test_opt_in_confirmation_reports_missing_invalid_or_rejected_grants(client, grants):
     success, failure = Mock(), Mock()
-    transport = connect(
-        client, on_subscribe_success=success, on_subscribe_failure=failure
+    transport = connect(client)
+    transport.subscribe(
+        ["synthetic/a", "synthetic/b"], qos=1, on_success=success, on_failure=failure
     )
-    transport.subscribe(["synthetic/a", "synthetic/b"], qos=1)
     suback(client, grants)
     success.assert_not_called()
     failure.assert_called_once_with("subscriptions not granted requested QoS")
@@ -115,10 +115,10 @@ def test_opt_in_confirmation_reports_missing_invalid_or_rejected_grants(client, 
 
 def test_opt_in_confirmation_accepts_legal_qos_downgrade(client):
     success, failure = Mock(), Mock()
-    transport = connect(
-        client, on_subscribe_success=success, on_subscribe_failure=failure
+    transport = connect(client)
+    transport.subscribe(
+        ["synthetic/a", "synthetic/b"], qos=1, on_success=success, on_failure=failure
     )
-    transport.subscribe(["synthetic/a", "synthetic/b"], qos=1)
     suback(client, [1, 0])
     success.assert_called_once_with()
     failure.assert_not_called()
@@ -148,11 +148,9 @@ def test_invalid_qos_never_subscribes(client, qos):
 
 def test_immediate_subscription_rejection_notifies_opt_in_provider(client):
     success, failure = Mock(), Mock()
-    transport = connect(
-        client, on_subscribe_success=success, on_subscribe_failure=failure
-    )
+    transport = connect(client)
     client[0].subscribe.return_value = (4, None)
-    transport.subscribe(["synthetic/a"], qos=1)
+    transport.subscribe(["synthetic/a"], qos=1, on_success=success, on_failure=failure)
     failure.assert_called_once_with("subscription rejected")
     success.assert_not_called()
 
@@ -161,9 +159,9 @@ def test_subscription_exception_is_reported_without_exception_text_when_opted_in
     client,
 ):
     failure = Mock()
-    transport = connect(client, on_subscribe_failure=failure)
+    transport = connect(client)
     client[0].subscribe.side_effect = ValueError("synthetic-private-details")
-    assert transport.subscribe(["synthetic/a"], qos=1) == []
+    assert transport.subscribe(["synthetic/a"], qos=1, on_failure=failure) == []
     failure.assert_called_once_with("subscription failed")
 
 
@@ -174,16 +172,15 @@ def test_default_subscription_exception_behavior_is_unchanged(client):
         transport.subscribe(["synthetic/a"])
 
 
-def test_default_message_callback_and_optional_metadata_preserve_delivery(client):
-    plain, details = Mock(), Mock()
-    transport = connect(client, on_message=plain, on_message_details=details)
+def test_message_callback_preserves_retained_metadata(client):
+    details = Mock()
+    transport = connect(client, on_message_details=details)
     instance = client[0]
     for retained in (False, True):
         delivery = SimpleNamespace(
             topic="synthetic/a", payload=b"synthetic", retain=retained
         )
         instance.on_message(instance, None, delivery)
-        plain.assert_called_with("synthetic/a", b"synthetic")
         details.assert_called_with(delivery)
     assert transport.is_connected
 
@@ -219,23 +216,20 @@ def test_loop_start_failure_is_reported_only_to_opt_in_callback(client):
     failed.assert_called_once_with()
 
 
-@pytest.mark.parametrize("stop_loop_first", [True, False])
-def test_disconnect_order_and_pending_confirmation_cleanup(client, stop_loop_first):
+def test_disconnect_order_and_pending_confirmation_cleanup(client):
     success = Mock()
-    transport = connect(client, on_subscribe_success=success)
-    transport.subscribe(["synthetic/a"], qos=1)
+    transport = connect(client)
+    transport.subscribe(["synthetic/a"], qos=1, on_success=success)
     instance = client[0]
     order = []
     instance.disconnect.side_effect = lambda: order.append("disconnect")
     instance.loop_stop.side_effect = lambda: order.append("loop_stop")
-    transport.disconnect(stop_loop_first=stop_loop_first)
-    assert order == (
-        ["loop_stop", "disconnect"] if stop_loop_first else ["disconnect", "loop_stop"]
-    )
+    transport.disconnect()
+    assert order == ["disconnect", "loop_stop"]
     assert not transport.is_connected
     suback(client, [1])
     success.assert_not_called()
-    transport.disconnect(stop_loop_first=stop_loop_first)
+    transport.disconnect()
     assert len(order) == 2
 
 
@@ -246,17 +240,17 @@ def test_opt_in_disconnect_still_stops_loop_and_clears_state_on_disconnect_error
     instance = client[0]
     instance.disconnect.side_effect = ValueError("synthetic-error")
     with pytest.raises(ValueError, match="synthetic-error"):
-        transport.disconnect(stop_loop_first=False)
+        transport.disconnect()
     instance.loop_stop.assert_called_once()
     assert not transport.is_connected
-    transport.disconnect(stop_loop_first=False)
+    transport.disconnect()
     instance.disconnect.assert_called_once()
 
 
 def test_connection_loss_discards_previous_subscription_confirmation(client):
     success = Mock()
-    transport = connect(client, on_subscribe_success=success)
-    transport.subscribe(["synthetic/a"], qos=1)
+    transport = connect(client)
+    transport.subscribe(["synthetic/a"], qos=1, on_success=success)
     instance = client[0]
     instance.on_disconnect(instance, None, {}, 1, None)
     suback(client, [1])
