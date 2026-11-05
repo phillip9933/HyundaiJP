@@ -4,6 +4,7 @@ Ordinary controls report HTTP service acceptance without claiming physical
 execution. Fresh-status requests retain correlated MQTT completion checks.
 """
 
+from collections.abc import Callable
 from contextlib import ExitStack
 import copy
 import datetime as dt
@@ -16,10 +17,9 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import requests
-from requests.exceptions import JSONDecodeError
 
 from .authentication import JapanAuthClient
-from .const import DOMAIN, ENGINE_TYPES, ORDER_STATUS, SEAT_STATUS
+from .const import ENGINE_TYPES, ORDER_STATUS, SEAT_STATUS
 from .exceptions import (
     APIError,
     AuthenticationError,
@@ -73,8 +73,11 @@ class HyundaiBluelinkApi(JapanCommandsMixin, JapanSVM, JapanAuthClient):
     def __init__(self) -> None:
         super().__init__()
         self._telemetry = JapanTelemetry(self.data_timezone, self.temperature_range)
-        self.previous_latitude: float | None = None
-        self.previous_longitude: float | None = None
+        self._geocode_coordinates: dict[str, tuple[float, float]] = {}
+        self._geocode_retry_at: dict[str, float] = {}
+        self._geocode_diagnostics: dict[str, Any] = {}
+        self._optional_retry_at: dict[tuple[str, str], float] = {}
+        self._optional_read_diagnostics: dict[str, dict[str, Any]] = {}
         self._japan_actions: dict[
             str, tuple[str, tuple[str, ...] | None, ORDER_STATUS | None]
         ] = {}
@@ -329,6 +332,21 @@ class HyundaiBluelinkApi(JapanCommandsMixin, JapanSVM, JapanAuthClient):
             "last_command": dict(self._japan_command_diagnostics),
             "last_camera_capture": self.svm_diagnostics,
             "last_refresh": dict(self._japan_refresh_diagnostics),
+            **(
+                {
+                    "optional_reads": {
+                        section: dict(summary)
+                        for section, summary in self._optional_read_diagnostics.items()
+                    }
+                }
+                if self._optional_read_diagnostics
+                else {}
+            ),
+            **(
+                {"geocoding": dict(self._geocode_diagnostics)}
+                if self._geocode_diagnostics
+                else {}
+            ),
             **(
                 {"passive_state": dict(self._passive_state_diagnostics)}
                 if self._passive_state_diagnostics
@@ -711,27 +729,41 @@ class HyundaiBluelinkApi(JapanCommandsMixin, JapanSVM, JapanAuthClient):
                 )
         except KeyError, TypeError, ValueError, AttributeError:
             raise InvalidAPIResponseError("Japan cached status is incomplete") from None
-        # Supplement only absent parking data and limit history reads to daily.
-        # Optional malformed data cannot invalidate otherwise valid status.
+        # Optional enrichment cannot discard valid core status after a
+        # temporary endpoint failure. Authentication/rate-limit failures still
+        # propagate so they are handled once at the account boundary.
         if (
             parsed_vehicle.location_latitude is None
             or parsed_vehicle.location_longitude is None
         ) and time.monotonic() - self._location_missing_at.get(
             vehicle.id, -3600
         ) >= 3600:
-            try:
-                self.update_vehicle_with_cached_location(token, parsed_vehicle)
-            except NoDataFound, InvalidAPIResponseError:
-                self._location_missing_at[vehicle.id] = time.monotonic()
+            self._read_optional_state(
+                token,
+                parsed_vehicle,
+                vehicle,
+                "location",
+                self.update_vehicle_with_cached_location,
+                (
+                    "_location_latitude",
+                    "_location_longitude",
+                    "_location_last_set_time",
+                ),
+                unavailable_cooldown=3600,
+            )
         if (
             vehicle.engine_type in (ENGINE_TYPES.EV, ENGINE_TYPES.PHEV)
             and time.monotonic() - self._history_updated_at.get(vehicle.id, -86400)
             >= 86400
+        ) and self._read_optional_state(
+            token,
+            parsed_vehicle,
+            vehicle,
+            "history",
+            self.update_vehicle_with_driving_info,
+            ("total_power_consumed", "total_power_regenerated", "_daily_stats"),
+            unavailable_cooldown=86400,
         ):
-            try:
-                self.update_vehicle_with_driving_info(token, parsed_vehicle)
-            except NoDataFound, InvalidAPIResponseError:
-                pass
             self._history_updated_at[vehicle.id] = time.monotonic()
         if parsed_vehicle.engine_type in (ENGINE_TYPES.EV, ENGINE_TYPES.PHEV) and (
             parsed_vehicle.ev_charge_limits_ac is None
@@ -743,18 +775,68 @@ class HyundaiBluelinkApi(JapanCommandsMixin, JapanSVM, JapanAuthClient):
                 and time.monotonic() - cached_targets[0] < 3600
             ):
                 targets = cached_targets[1]
-                parsed_vehicle.ev_charge_limits_ac = targets.get(1, targets.get(2))
-                parsed_vehicle.ev_charge_limits_dc = targets.get(0)
+                if parsed_vehicle.ev_charge_limits_ac is None:
+                    parsed_vehicle.ev_charge_limits_ac = targets.get(1, targets.get(2))
+                if parsed_vehicle.ev_charge_limits_dc is None:
+                    parsed_vehicle.ev_charge_limits_dc = targets.get(0)
             else:
-                try:
-                    self.update_vehicle_with_charge_targets(token, parsed_vehicle)
-                except NoDataFound, InvalidAPIResponseError:
-                    self._charge_target_cache[vehicle.id] = (time.monotonic(), {})
+                self._read_optional_state(
+                    token,
+                    parsed_vehicle,
+                    vehicle,
+                    "charge_targets",
+                    self.update_vehicle_with_charge_targets,
+                    ("ev_charge_limits_ac", "ev_charge_limits_dc"),
+                    unavailable_cooldown=3600,
+                )
         if protocol:
             # MQTT may arrive during optional cached reads. Apply it to the
             # candidate so those optional fields are retained without rollback.
             self.apply_cached_mqtt_state(parsed_vehicle)
         vehicle.__dict__.update(parsed_vehicle.__dict__)
+
+    def _read_optional_state(
+        self,
+        token: Token,
+        candidate: Vehicle,
+        previous: Vehicle,
+        section: str,
+        reader: Callable[[Token, Vehicle], None],
+        fields: tuple[str, ...],
+        *,
+        unavailable_cooldown: int,
+    ) -> bool:
+        """Read nonessential data with bounded retries and no private errors."""
+        key = (candidate.id, section)
+
+        def retain_previous() -> None:
+            for field in fields:
+                current = getattr(candidate, field)
+                if section == "location" or current is None or current == []:
+                    setattr(candidate, field, copy.deepcopy(getattr(previous, field)))
+
+        if time.monotonic() < self._optional_retry_at.get(key, 0):
+            retain_previous()
+            return False
+        try:
+            reader(token, candidate)
+        except AuthenticationError, RateLimitingError:
+            raise
+        except APIError as error:
+            retain_previous()
+            transient = not isinstance(error, (NoDataFound, InvalidAPIResponseError))
+            delay = 5 * 60 if transient else unavailable_cooldown
+            self._optional_retry_at[key] = time.monotonic() + delay
+            old = self._optional_read_diagnostics.get(section, {})
+            self._optional_read_diagnostics[section] = {
+                "state": "temporarily_unavailable" if transient else "unavailable",
+                "failures": old.get("failures", 0) + 1,
+                "retry_seconds": delay,
+            }
+            return False
+        self._optional_retry_at.pop(key, None)
+        self._optional_read_diagnostics[section] = {"state": "updated"}
+        return True
 
     def update_vehicle_with_charge_targets(
         self, token: Token, vehicle: Vehicle
@@ -974,38 +1056,55 @@ class HyundaiBluelinkApi(JapanCommandsMixin, JapanSVM, JapanAuthClient):
         vehicle: Vehicle,
         use_email: bool,
     ) -> None:
-        if vehicle.location_latitude and vehicle.location_longitude:
-            if (
-                vehicle.geocode
-                and vehicle.location_latitude == self.previous_latitude
-                and vehicle.location_longitude == self.previous_longitude
-            ):  # previous coordinates are the same, so keep last valid vehicle.geocode
-                _LOGGER.debug(f"{DOMAIN} - Keeping last geocode location")
-            else:
-                email_parameter = ""
-                if use_email is True:
-                    email_parameter = "&email=" + token.username
-
-                url = (
-                    "https://nominatim.openstreetmap.org/reverse?lat="
-                    + str(vehicle.location_latitude)
-                    + "&lon="
-                    + str(vehicle.location_longitude)
-                    + "&format=json&addressdetails=1&zoom=18"
-                    + email_parameter
-                )
-                headers = {"user-agent": "curl/7.81.0"}
-                response = requests.get(url, headers=headers, timeout=(5, 15))
-                try:
-                    response = response.json()
-                except JSONDecodeError:
-                    _LOGGER.warning(f"{DOMAIN} - failed geocode openstreetmap")
-                    vehicle.geocode = None
-                else:
-                    vehicle.geocode = (
-                        get_child_value(response, "display_name"),
-                        get_child_value(response, "address"),
-                    )
-                    self.previous_latitude = vehicle.location_latitude
-                    self.previous_longitude = vehicle.location_longitude
-                    _LOGGER.debug(f"{DOMAIN} - geocode openstreetmap")
+        """Enrich one vehicle without making geocoder availability mandatory."""
+        latitude, longitude = vehicle.location_latitude, vehicle.location_longitude
+        if latitude is None or longitude is None:
+            return
+        coordinates = (latitude, longitude)
+        if self._geocode_coordinates.get(vehicle.id) == coordinates and any(
+            vehicle.geocode
+        ):
+            return
+        if time.monotonic() < self._geocode_retry_at.get(vehicle.id, 0):
+            return
+        params: dict[str, str | int | float] = {
+            "lat": latitude,
+            "lon": longitude,
+            "format": "json",
+            "addressdetails": 1,
+            "zoom": 18,
+        }
+        if use_email:
+            params["email"] = token.username
+        try:
+            response = self.session.get(
+                "https://nominatim.openstreetmap.org/reverse",
+                params=params,
+                headers={
+                    "User-Agent": "Hyundai-Bluelink-JP/1.0 (+https://github.com/phillip9933/HyundaiJP)"
+                },
+                timeout=(5, 15),
+            )
+            response.raise_for_status()
+            result = response.json()
+            if not isinstance(result, dict) or not isinstance(
+                result.get("display_name"), str
+            ):
+                raise TypeError("Invalid geocoder result")
+            address = result.get("address")
+            if not isinstance(address, (str, dict)):
+                raise TypeError("Invalid geocoder address")
+        except requests.RequestException, RequestTimeoutError, ValueError, TypeError:
+            self._geocode_retry_at[vehicle.id] = time.monotonic() + 15 * 60
+            self._geocode_diagnostics = {
+                "state": "unavailable",
+                "retry_seconds": 15 * 60,
+            }
+            _LOGGER.debug(
+                "Japan optional geocoding unavailable; retaining the prior address"
+            )
+            return
+        vehicle.geocode = (result["display_name"], address)
+        self._geocode_coordinates[vehicle.id] = coordinates
+        self._geocode_retry_at.pop(vehicle.id, None)
+        self._geocode_diagnostics = {"state": "updated"}
