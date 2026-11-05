@@ -1,0 +1,11 @@
+{
+  "api": {
+    "repository": "https://github.com/phillip9933/hyundai_kia_connect_api_JP",
+    "commit": "584e71c50ba507d2c6c77ba92eed445058001146"
+  },
+  "integration": {
+    "repository": "https://github.com/phillip9933/kia_uvo_JP",
+    "commit": "35c03987ecd0c4187fc3cb6fb22439a8c17e89ab"
+  },
+  "note": "Independent Japan-only distribution. Existing repositories, PRs and builds preserved."
+}
