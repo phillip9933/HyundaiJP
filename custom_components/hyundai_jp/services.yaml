@@ -52,21 +52,17 @@ start_climate:
       selector:
         boolean:
     heating:
-      required: true
-      example: false
-      default: false
+      required: false
       selector:
         select:
           options:
             - label: "Off"
               value: "0"
-            - label: "Steering Wheel(not EU), Side and Back Defroster"
-              value: "4"
-            - label: "Steering Wheel (EU some models), Side and Back Defroster"
+            - label: "Steering Wheel and Rear/Mirror Heating"
               value: "1"
-            - label: "Rear Window Only"
+            - label: "Rear/Mirror Heating Only"
               value: "2"
-            - label: "Steering Wheel Only(None EU only)"
+            - label: "Steering Wheel Only"
               value: "3"
     steering_wheel:
       required: false
@@ -223,7 +219,7 @@ set_charge_limits:
         device:
           integration: hyundai_jp
     dc_limit:
-      required: false
+      required: true
       example: 50
       default: 90
       selector:
@@ -233,7 +229,7 @@ set_charge_limits:
           step: 10
           unit_of_measurement: "%"
     ac_limit:
-      required: false
+      required: true
       example: 50
       default: 90
       selector:
@@ -268,7 +264,7 @@ set_windows:
         device:
           integration: hyundai_jp
     flwindow:
-      required: true
+      required: false
       selector:
         select:
           options:
@@ -279,7 +275,7 @@ set_windows:
             - label: "Ventilation"
               value: "2"
     frwindow:
-      required: true
+      required: false
       selector:
         select:
           options:
@@ -290,7 +286,7 @@ set_windows:
             - label: "Ventilation"
               value: "2"
     rrwindow:
-      required: true
+      required: false
       selector:
         select:
           options:
@@ -301,7 +297,7 @@ set_windows:
             - label: "Ventilation"
               value: "2"
     rlwindow:
-      required: true
+      required: false
       selector:
         select:
           options:
@@ -320,19 +316,15 @@ schedule_charging_and_climate:
           integration: hyundai_jp
     charging_enabled:
       required: false
-      default: false
       selector:
         boolean:
     first_departure_enabled:
       required: false
-      default: false
       selector:
         boolean:
     first_departure_days:
       required: false
       example: '["0", "1"]'
-      default:
-        - "0"
       selector:
         select:
           multiple: true
@@ -353,19 +345,15 @@ schedule_charging_and_climate:
               value: "6"
     first_departure_time:
       required: false
-      default: false
       selector:
         time:
     second_departure_enabled:
       required: false
-      default: false
       selector:
         boolean:
     second_departure_days:
       required: false
       example: '["0", "1"]'
-      default:
-        - "0"
       selector:
         select:
           multiple: true
@@ -386,33 +374,27 @@ schedule_charging_and_climate:
               value: "6"
     second_departure_time:
       required: false
-      default: false
       selector:
         time:
     off_peak_start_time:
       required: false
-      default: false
       selector:
         time:
     off_peak_end_time:
       required: false
-      default: false
       selector:
         time:
     off_peak_charge_only_enabled:
       required: false
-      default: false
       selector:
         boolean:
     climate_enabled:
       required: false
-      default: false
       selector:
         boolean:
     temperature:
       required: false
       example: 21.5
-      default: 21
       selector:
         number:
           min: 17
@@ -423,7 +405,6 @@ schedule_charging_and_climate:
     temperature_unit:
       required: false
       example: "0"
-      default: "0"
       selector:
         select:
           options:
@@ -433,7 +414,6 @@ schedule_charging_and_climate:
               value: "1"
     defrost:
       required: false
-      default: false
       selector:
         boolean:
 start_hazard_lights:
@@ -465,8 +445,12 @@ stop_valet_mode:
         device:
           integration: hyundai_jp
 set_navigation:
-  target:
   fields:
+    device_id:
+      required: false
+      selector:
+        device:
+          integration: hyundai_jp
     latitude:
       required: true
       selector:
@@ -513,7 +497,7 @@ set_off_peak_charging:
         device:
           integration: hyundai_jp
     mode:
-      required: true
+      required: false
       selector:
         select:
           options:

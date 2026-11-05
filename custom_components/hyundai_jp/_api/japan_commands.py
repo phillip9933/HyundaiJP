@@ -34,6 +34,7 @@ from .const import (
 from .exceptions import (
     AuthenticationError,
     InvalidAPIResponseError,
+    PartialCommandError,
     RequestTimeoutError,
     UnsupportedControlError,
 )
@@ -545,12 +546,29 @@ class JapanCommandsMixin:
         """Preserve unspecified combined schedule fields from the cloud snapshot."""
         profile = self._vehicle_profiles.get(vehicle.id, {})
         flat = profile.get("appMode") == "EV5"
-        requested = vars(options)
-        if not any(
-            value is not None
-            for key, value in requested.items()
-            if key != "temperature_unit"
+        if options.temperature_unit is not None and (
+            type(options.temperature_unit) is not int
+            or options.temperature_unit not in (0, 1)
         ):
+            raise ValueError("Japan schedule temperature unit is invalid")
+        departures = (options.first_departure, options.second_departure)
+        charge_active = any(
+            value is not None
+            for value in (
+                options.charging_enabled,
+                options.off_peak_start_time,
+                options.off_peak_end_time,
+                options.off_peak_charge_only_enabled,
+            )
+        )
+        climate_active = any(
+            departure is not None and departure.has_changes()
+            for departure in departures
+        ) or any(
+            value is not None
+            for value in (options.temperature, options.climate_enabled, options.defrost)
+        )
+        if not charge_active and not climate_active:
             raise ValueError("No Japan schedule changes requested")
         vehicle_id = self._command_vehicle_id(vehicle)
         headers = self._get_control_headers(token, vehicle)
@@ -566,7 +584,7 @@ class JapanCommandsMixin:
             "offPeakPowerInfo": copy.deepcopy(current.get("offPeakPowerInfo")),
         }
         for index, departure in enumerate(
-            (options.first_departure, options.second_departure), 1
+            departures if not flat or climate_active else (), 1
         ):
             source = current.get(
                 "reservChargeInfo" if index == 1 else "reservChargeInfo2"
@@ -597,6 +615,27 @@ class JapanCommandsMixin:
                     info["day"] = list(departure.days)
                 if departure.time is not None:
                     info["time"] = self._japan_schedule_time(departure.time)
+            temperature = (
+                departure.temperature
+                if departure is not None and departure.temperature is not None
+                else options.temperature
+            )
+            if temperature is not None and options.temperature_unit == 1:
+                if isinstance(temperature, bool) or not isinstance(
+                    temperature, (int, float)
+                ):
+                    raise ValueError("Japan schedule temperature must be numeric")
+                temperature = (temperature - 32) * 5 / 9
+            climate_enabled = (
+                departure.climate_enabled
+                if departure is not None and departure.climate_enabled is not None
+                else options.climate_enabled
+            )
+            defrost = (
+                departure.defrost
+                if departure is not None and departure.defrost is not None
+                else options.defrost
+            )
             fatc = detail.get("reservFatcSet")
             if isinstance(fatc, dict):
                 air = fatc.get("airTemp")
@@ -604,51 +643,71 @@ class JapanCommandsMixin:
                     raise InvalidAPIResponseError(
                         "Japan schedule temperature is incomplete"
                     )
-                temperature = options.temperature
-                if temperature is None:
-                    temperature = self._legacy_temperature(vehicle, air)
-                if temperature is None:
-                    raise UnsupportedControlError(
-                        "Japan current schedule temperature encoding is unknown"
+                if not flat or temperature is not None:
+                    if temperature is None:
+                        temperature = self._legacy_temperature(vehicle, air)
+                    if temperature is None:
+                        raise UnsupportedControlError(
+                            "Japan current schedule temperature encoding is unknown"
+                        )
+                    hvac_type = air.get(
+                        "hvacTempType", profile.get("option", {}).get("hvacTempType")
                     )
-                hvac_type = air.get(
-                    "hvacTempType", profile.get("option", {}).get("hvacTempType")
-                )
-                valid = [
-                    self._legacy_temperature(
-                        vehicle,
-                        {"unit": 0, "hvacTempType": hvac_type, "value": f"{code:02X}H"},
+                    valid = [
+                        self._legacy_temperature(
+                            vehicle,
+                            {
+                                "unit": 0,
+                                "hvacTempType": hvac_type,
+                                "value": f"{code:02X}H",
+                            },
+                        )
+                        for code in range(0x40)
+                    ]
+                    if isinstance(temperature, bool) or not isinstance(
+                        temperature, (int, float)
+                    ):
+                        raise ValueError("Japan schedule temperature must be numeric")
+                    matched = next(
+                        (
+                            value
+                            for value in valid
+                            if value is not None
+                            and math.isclose(
+                                value, temperature, rel_tol=0, abs_tol=1e-7
+                            )
+                        ),
+                        None,
                     )
-                    for code in range(0x40)
-                ]
-                if temperature not in valid:
-                    raise ValueError(
-                        "Japan schedule temperature is outside profile range"
-                    )
-                encoded = str(float(temperature))
-                if flat:
-                    encoded = next(
-                        f"{code:02X}H"
-                        for code, value in enumerate(valid)
-                        if value == temperature
-                    )
-                air.update({"value": encoded, "unit": 0, "hvacTempType": hvac_type})
-                if options.climate_enabled is not None:
-                    if not isinstance(options.climate_enabled, bool):
+                    if matched is None:
+                        raise ValueError(
+                            "Japan schedule temperature is outside profile range"
+                        )
+                    temperature = matched
+                    encoded = str(float(temperature))
+                    if flat:
+                        encoded = next(
+                            f"{code:02X}H"
+                            for code, value in enumerate(valid)
+                            if value == temperature
+                        )
+                    air.update({"value": encoded, "unit": 0, "hvacTempType": hvac_type})
+                if climate_enabled is not None:
+                    if not isinstance(climate_enabled, bool):
                         raise ValueError(
                             "Japan schedule climate enabled must be boolean"
                         )
-                    fatc["airCtrl"] = int(options.climate_enabled)
-                if options.defrost is not None:
-                    if not isinstance(options.defrost, bool):
+                    fatc["airCtrl"] = int(climate_enabled)
+                if defrost is not None:
+                    if not isinstance(defrost, bool):
                         raise ValueError("Japan schedule defrost must be boolean")
-                    fatc["defrost"] = options.defrost
+                    fatc["defrost"] = defrost
             elif any(
                 value is not None
                 for value in (
-                    options.temperature,
-                    options.climate_enabled,
-                    options.defrost,
+                    temperature,
+                    climate_enabled,
+                    defrost,
                 )
             ):
                 raise UnsupportedControlError(
@@ -660,47 +719,31 @@ class JapanCommandsMixin:
                 raise ValueError("Japan charging enabled must be boolean")
             payload["reservFlag"] = int(options.charging_enabled)
         peak = payload["offPeakPowerInfo"]
-        if (
-            not isinstance(peak, dict)
-            or not isinstance(peak.get("offPeakPowerTime1"), dict)
-            or payload["reservFlag"] is None
-        ):
-            raise InvalidAPIResponseError(
-                "Japan current off-peak schedule is incomplete"
-            )
-        for field, value in (
-            ("starttime", options.off_peak_start_time),
-            ("endtime", options.off_peak_end_time),
-        ):
-            if value is not None:
-                peak["offPeakPowerTime1"][field] = self._japan_schedule_time(value)
-        if options.off_peak_charge_only_enabled is not None:
-            if not isinstance(options.off_peak_charge_only_enabled, bool):
-                raise ValueError("Japan off-peak only enabled must be boolean")
-            peak["offPeakPowerFlag"] = 2 if options.off_peak_charge_only_enabled else 1
+        if not flat or charge_active:
+            if (
+                not isinstance(peak, dict)
+                or not isinstance(peak.get("offPeakPowerTime1"), dict)
+                or payload["reservFlag"] is None
+            ):
+                raise InvalidAPIResponseError(
+                    "Japan current off-peak schedule is incomplete"
+                )
+            for field, value in (
+                ("starttime", options.off_peak_start_time),
+                ("endtime", options.off_peak_end_time),
+            ):
+                if value is not None:
+                    peak["offPeakPowerTime1"][field] = self._japan_schedule_time(value)
+            if options.off_peak_charge_only_enabled is not None:
+                if not isinstance(options.off_peak_charge_only_enabled, bool):
+                    raise ValueError("Japan off-peak only enabled must be boolean")
+                peak["offPeakPowerFlag"] = (
+                    2 if options.off_peak_charge_only_enabled else 1
+                )
         if not flat:
             return self._japan_command(
                 token, vehicle, "reservation/chargehvac", payload
             )
-        charge_active = any(
-            value is not None
-            for value in (
-                options.charging_enabled,
-                options.off_peak_start_time,
-                options.off_peak_end_time,
-                options.off_peak_charge_only_enabled,
-            )
-        )
-        climate_active = any(
-            value is not None
-            for value in (
-                options.first_departure,
-                options.second_departure,
-                options.temperature,
-                options.climate_enabled,
-                options.defrost,
-            )
-        )
         requests = []
         if charge_active:
             requests.append(
@@ -738,10 +781,30 @@ class JapanCommandsMixin:
                 }
             requests.append(("reservation/hvac", climate))
         # Validate both wire envelopes before either setting can be changed.
-        actions = [
-            self._japan_command(token, vehicle, endpoint, body)
-            for endpoint, body in requests
-        ]
+        actions = []
+        accepted_scopes: list[str] = []
+        for endpoint, body in requests:
+            scope = "charging" if endpoint.endswith("/charge") else "climate"
+            try:
+                actions.append(self._japan_command(token, vehicle, endpoint, body))
+            except Exception as err:
+                if accepted_scopes:
+                    unknown = isinstance(
+                        err, (RequestTimeoutError, InvalidAPIResponseError)
+                    )
+                    self._japan_command_diagnostics["partial_schedule"] = {
+                        "accepted_scopes": list(accepted_scopes),
+                        "failed_scope": scope,
+                        "submission_outcome": "unknown" if unknown else "failed",
+                        "vehicle_execution_confirmed": False,
+                    }
+                    raise PartialCommandError(
+                        tuple(accepted_scopes),
+                        scope,
+                        outcome_unknown=unknown,
+                    ) from None
+                raise
+            accepted_scopes.append(scope)
         if len(actions) == 1:
             return actions[0]
         action_id = str(uuid.uuid4())

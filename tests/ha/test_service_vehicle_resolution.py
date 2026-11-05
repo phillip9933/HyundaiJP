@@ -49,7 +49,7 @@ def _services(monkeypatch, accounts, devices=None):
     monkeypatch.setattr(services.device_registry, "async_get", lambda _: registry)
     handlers = {}
 
-    def register(domain, service, handler):
+    def register(domain, service, handler, *, schema=None):
         assert domain == DOMAIN
         handlers[service] = handler
 

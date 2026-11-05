@@ -31,7 +31,6 @@ from ._api import (
     ScheduleChargingClimateRequestOptions,
     SVMDetails,
     Token,
-    Vehicle,
     VehicleManager,
     WindowRequestOptions,
 )
@@ -433,48 +432,35 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Start climate with default options (API fills sensible defaults)."""
         await self.async_start_climate(vehicle_id, ClimateRequestOptions())
 
-    def _build_schedule_options_from_vehicle(
-        self, vehicle: Vehicle
+    @staticmethod
+    def _schedule_for_departure(
+        departure_num: int,
+        departure: ScheduleChargingClimateRequestOptions.DepartureOptions,
     ) -> ScheduleChargingClimateRequestOptions:
-        """Build schedule options from current vehicle state for partial updates."""
+        """Select one slot without copying stale telemetry into other fields."""
+        if type(departure_num) is not int or departure_num not in (1, 2):
+            raise ValueError("Departure must be 1 or 2")
         return ScheduleChargingClimateRequestOptions(
-            first_departure=ScheduleChargingClimateRequestOptions.DepartureOptions(
-                enabled=vehicle.ev_first_departure_enabled or False,
-                days=vehicle.ev_first_departure_days or [0],
-                time=vehicle.ev_first_departure_time or dt.time(),
-            ),
-            second_departure=ScheduleChargingClimateRequestOptions.DepartureOptions(
-                enabled=vehicle.ev_second_departure_enabled or False,
-                days=vehicle.ev_second_departure_days or [0],
-                time=vehicle.ev_second_departure_time or dt.time(),
-            ),
-            charging_enabled=vehicle.ev_schedule_charge_enabled or False,
-            off_peak_start_time=vehicle.ev_off_peak_start_time or dt.time(),
-            off_peak_end_time=vehicle.ev_off_peak_end_time or dt.time(),
-            off_peak_charge_only_enabled=vehicle.ev_off_peak_charge_only_enabled
-            or False,
-            climate_enabled=vehicle.ev_first_departure_climate_enabled or False,
-            temperature=vehicle.ev_first_departure_climate_temperature or 21.0,
-            defrost=vehicle.ev_first_departure_climate_defrost or False,
+            first_departure=departure if departure_num == 1 else None,
+            second_departure=departure if departure_num == 2 else None,
         )
 
     async def async_set_schedule_charge_enabled(
         self, vehicle_id: str, enabled: bool
     ) -> None:
-        """Toggle scheduled charging on/off."""
-        vehicle = self.vehicle_manager.vehicles[vehicle_id]
-        options = self._build_schedule_options_from_vehicle(vehicle)
-        options.charging_enabled = enabled
-        await self.async_schedule_charging_and_climate(vehicle_id, options)
+        """Toggle scheduled charging without replacing departure settings."""
+        await self.async_schedule_charging_and_climate(
+            vehicle_id, ScheduleChargingClimateRequestOptions(charging_enabled=enabled)
+        )
 
     async def async_set_off_peak_charge_only_enabled(
         self, vehicle_id: str, enabled: bool
     ) -> None:
-        """Toggle off-peak charge only on/off."""
-        vehicle = self.vehicle_manager.vehicles[vehicle_id]
-        options = self._build_schedule_options_from_vehicle(vehicle)
-        options.off_peak_charge_only_enabled = enabled
-        await self.async_schedule_charging_and_climate(vehicle_id, options)
+        """Change only the off-peak priority flag."""
+        await self.async_schedule_charging_and_climate(
+            vehicle_id,
+            ScheduleChargingClimateRequestOptions(off_peak_charge_only_enabled=enabled),
+        )
 
     async def async_set_off_peak_charging(
         self,
@@ -484,68 +470,48 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         start: dt.time | None = None,
         end: dt.time | None = None,
     ) -> None:
-        """Set the off-peak charging schedule mode and/or window.
-
-        ``mode`` maps to the (charging_enabled, off_peak_charge_only_enabled)
-        pair the API expects: ``OFF`` disables scheduled charging, ``TIME``
-        charges only during the off-peak window (time priority), ``TARGET``
-        prefers off-peak tariffs but continues past the window to reach the
-        target SoC (target priority). ``mode=None`` preserves the current mode
-        and only adjusts the window — used by the time entities. Other
-        schedule fields (departures) are preserved.
-        """
-        vehicle = self.vehicle_manager.vehicles[vehicle_id]
-        options = self._build_schedule_options_from_vehicle(vehicle)
+        """Change only the requested mode and/or off-peak window fields."""
+        options = ScheduleChargingClimateRequestOptions(
+            off_peak_start_time=start, off_peak_end_time=end
+        )
         if mode is not None:
-            if mode is OffPeakChargingMode.OFF:
-                options.charging_enabled = False
-            elif mode is OffPeakChargingMode.TIME:
-                options.charging_enabled = True
-                options.off_peak_charge_only_enabled = True
-            elif mode is OffPeakChargingMode.TARGET:
-                options.charging_enabled = True
-                options.off_peak_charge_only_enabled = False
-        if start is not None:
-            options.off_peak_start_time = start
-        if end is not None:
-            options.off_peak_end_time = end
+            options.charging_enabled = mode is not OffPeakChargingMode.OFF
+            if mode is not OffPeakChargingMode.OFF:
+                options.off_peak_charge_only_enabled = mode is OffPeakChargingMode.TIME
         await self.async_schedule_charging_and_climate(vehicle_id, options)
 
     async def async_set_departure_enabled(
         self, vehicle_id: str, departure_num: int, enabled: bool
     ) -> None:
-        """Toggle a departure schedule on/off."""
-        vehicle = self.vehicle_manager.vehicles[vehicle_id]
-        options = self._build_schedule_options_from_vehicle(vehicle)
-        departure = (
-            options.first_departure if departure_num == 1 else options.second_departure
+        """Toggle one departure; explicitly enable its reservation when needed."""
+        options = self._schedule_for_departure(
+            departure_num,
+            ScheduleChargingClimateRequestOptions.DepartureOptions(enabled=enabled),
         )
-        if departure is not None:
-            departure.enabled = enabled
-        # reservFlag (charging_enabled) must be 1 for departure slots to take
-        # effect. If the vehicle doesn't expose ev_schedule_charge_enabled
-        # (None), the builder defaults it to False, causing the API to accept
-        # the request but ignore per-slot reservChargeSet.
-        if enabled and not options.charging_enabled:
+        if enabled:
             options.charging_enabled = True
         await self.async_schedule_charging_and_climate(vehicle_id, options)
 
     async def async_set_departure_climate_enabled(
         self, vehicle_id: str, departure_num: int, enabled: bool
     ) -> None:
-        """Toggle departure climate on/off."""
-        vehicle = self.vehicle_manager.vehicles[vehicle_id]
-        options = self._build_schedule_options_from_vehicle(vehicle)
-        options.climate_enabled = enabled
+        """Change climate for one departure, preserving the other slot."""
+        options = self._schedule_for_departure(
+            departure_num,
+            ScheduleChargingClimateRequestOptions.DepartureOptions(
+                climate_enabled=enabled
+            ),
+        )
         await self.async_schedule_charging_and_climate(vehicle_id, options)
 
     async def async_set_departure_defrost(
         self, vehicle_id: str, departure_num: int, enabled: bool
     ) -> None:
-        """Toggle departure defrost on/off."""
-        vehicle = self.vehicle_manager.vehicles[vehicle_id]
-        options = self._build_schedule_options_from_vehicle(vehicle)
-        options.defrost = enabled
+        """Change defrost for one departure, preserving the other slot."""
+        options = self._schedule_for_departure(
+            departure_num,
+            ScheduleChargingClimateRequestOptions.DepartureOptions(defrost=enabled),
+        )
         await self.async_schedule_charging_and_climate(vehicle_id, options)
 
     async def _async_save_token(self) -> None:

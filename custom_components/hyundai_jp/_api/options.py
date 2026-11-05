@@ -70,6 +70,13 @@ class ScheduleChargingClimateRequestOptions:
         enabled: bool | None = None
         days: list[int] | None = None  # Sun=0, Mon=1, ..., Sat=6
         time: dt.time | None = None
+        climate_enabled: bool | None = None
+        temperature: float | None = None
+        defrost: bool | None = None
+
+        def has_changes(self) -> bool:
+            """Empty slot objects do not request a write."""
+            return any(value is not None for value in vars(self).values())
 
     first_departure: DepartureOptions | None = None
     second_departure: DepartureOptions | None = None
@@ -79,8 +86,8 @@ class ScheduleChargingClimateRequestOptions:
     off_peak_charge_only_enabled: bool | None = None
     climate_enabled: bool | None = None
     temperature: float | None = None
-    # Accepted for existing HA service calls; Japan profile metadata determines
-    # the temperature encoding used on the wire.
+    # Input unit (0=Celsius, 1=Fahrenheit); the profile still determines the
+    # Celsius representation used on the wire.
     temperature_unit: int | None = None
     defrost: bool | None = None
 

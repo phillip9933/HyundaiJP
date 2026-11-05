@@ -57,6 +57,6 @@ async def test_schedule_charging_and_climate_parses_times(
     )
     options = coordinator.async_schedule_charging_and_climate.await_args.args[1]
     assert options.first_departure.time == time(7, 15)
-    assert options.second_departure.time is None
+    assert options.second_departure is None
     assert options.off_peak_start_time == time(22, 30)
     assert options.off_peak_end_time == time(6, 0)

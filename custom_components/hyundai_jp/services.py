@@ -18,6 +18,7 @@ from ._api import (
 )
 from .const import DOMAIN, OffPeakChargingMode
 from .coordinator import JapanDataUpdateCoordinator
+from .service_schemas import SERVICE_SCHEMAS
 
 SERVICE_UPDATE = "update"
 SERVICE_FORCE_UPDATE = "force_update"
@@ -158,10 +159,7 @@ def async_setup_services(hass: HomeAssistant) -> bool:
         if ac is not None and dc is not None:
             await coordinator.async_set_charge_limits(vehicle_id, int(ac), int(dc))
         else:
-            _LOGGER.error(
-                "%s - Unable to set charge limits. Both AC and DC value required, but not provided.",
-                DOMAIN,
-            )
+            raise HomeAssistantError("Both AC and DC charging limits are required")
 
     async def async_handle_set_windows(call: ServiceCall) -> None:
         coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
@@ -172,15 +170,10 @@ def async_setup_services(hass: HomeAssistant) -> bool:
             back_right=call.data.get("rrwindow"),
         )
 
-        if (
-            window_options.front_left is not None
-            and window_options.front_right is not None
-            and window_options.back_left is not None
-            and window_options.back_right is not None
-        ):
+        if any(value is not None for value in vars(window_options).values()):
             await coordinator.async_set_windows(vehicle_id, window_options)
         else:
-            _LOGGER.error("%s - All windows value required, but not provided.", DOMAIN)
+            raise HomeAssistantError("Provide at least one window setting")
 
     async def async_handle_set_charging_current(call: ServiceCall) -> None:
         coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
@@ -189,10 +182,7 @@ def async_setup_services(hass: HomeAssistant) -> bool:
         if current_level is not None:
             await coordinator.async_set_charging_current(vehicle_id, int(current_level))
         else:
-            _LOGGER.error(
-                "%s - Unable to set charging current. Level required, but not provided.",
-                DOMAIN,
-            )
+            raise HomeAssistantError("Charging current level is required")
 
     async def async_handle_schedule_charging_and_climate(call: ServiceCall) -> None:
         coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
@@ -214,7 +204,12 @@ def async_setup_services(hass: HomeAssistant) -> bool:
         # Confirm values are correct datatype
         def initialize_departure_option(
             departure_enabled: Any, departure_days: Any, departure_time: Any
-        ) -> ScheduleChargingClimateRequestOptions.DepartureOptions:
+        ) -> ScheduleChargingClimateRequestOptions.DepartureOptions | None:
+            if all(
+                value is None
+                for value in (departure_enabled, departure_days, departure_time)
+            ):
+                return None
             return ScheduleChargingClimateRequestOptions.DepartureOptions(
                 enabled=None if departure_enabled is None else bool(departure_enabled),
                 days=None
@@ -347,7 +342,9 @@ def async_setup_services(hass: HomeAssistant) -> bool:
     }
 
     for service in SUPPORTED_SERVICES:
-        hass.services.async_register(DOMAIN, service, services[service])
+        hass.services.async_register(
+            DOMAIN, service, services[service], schema=SERVICE_SCHEMAS[service]
+        )
     return True
 
 
