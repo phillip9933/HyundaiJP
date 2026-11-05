@@ -110,15 +110,24 @@ entities and the coordinator live in its parent directory. Other regions are not
 included. Keep shared helpers that Japan uses and test them alongside the Japan
 adapter.
 
-The coordinator owns polling, command serialization and shutdown. `svm_cache.py`
+Each account stores its typed coordinator in `ConfigEntry.runtime_data`.
+Services register once and route only to loaded accounts. The coordinator owns
+polling, command serialization and shutdown. `svm_cache.py`
 keeps camera captures and rendered views locally, using the coordinator’s tracked
 executor. In the bundled API, `client.py` connects the authentication, commands,
 SVM and telemetry components. `authentication.py` handles login and HTTP response
 envelopes, `http.py` owns the bounded HTTP session, `options.py` holds request
 models, and `telemetry.py` parses both Japan status formats.
 
-GitHub checks run offline regression tests, lint, formatting, typing and package
-validation. Builds contain the integration and its API together. GitHub Actions
+For local development, use Python 3.14.8 and run
+`python scripts/install_dependencies.py` in a virtual environment. This installs
+the minimum supported HA version; use `--homeassistant 2026.11.0` to select the
+current tested version. Run `ruff check .`, `ruff format --check .`, `mypy` and
+`pytest` before submitting changes.
+
+GitHub runs the same checks against HA 2026.9.2 and 2026.11.0, plus package
+validation. Branch-aware coverage reports cover the whole component and are
+saved as workflow artifacts, with an 80% combined coverage floor. Builds contain the integration and its API together. GitHub Actions
 does not use a Bluelink account or send vehicle commands. Real vehicle testing is
 done separately by the owner.
 
