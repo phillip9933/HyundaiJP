@@ -39,6 +39,12 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+
+def _account_unique_id(username: str) -> str:
+    """Use the same account identity for setup, reauth and reconfigure."""
+    return hashlib.sha256(username.strip().casefold().encode("utf-8")).hexdigest()
+
+
 STEP_RECONFIGURE_DATA_SCHEMA = vol.Schema(
     {
         vol.Required("reconfigure_choice"): selector(
@@ -158,6 +164,23 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Log in to a Hyundai Japan Bluelink account."""
         errors: dict[str, str] = {}
         if user_input is not None:
+            target_entry = (
+                self._get_reconfigure_entry()
+                if self._is_reconfigure
+                else self.reauth_entry
+            )
+            if (
+                target_entry is not None
+                and _account_unique_id(user_input[CONF_USERNAME])
+                != target_entry.unique_id
+            ):
+                # Reauthentication updates an existing account, not its identity.
+                # Reject before opening a temporary client or sending credentials.
+                return self.async_show_form(
+                    step_id="user",
+                    data_schema=STEP_CREDENTIALS_DATA_SCHEMA,
+                    errors={"base": "wrong_account"},
+                )
             pin = user_input.get(CONF_PIN)
             if not isinstance(pin, str) or not pin.strip():
                 errors[CONF_PIN] = "invalid_japan_pin"
@@ -190,9 +213,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         )
                     title = f"Hyundai Bluelink JP {user_input[CONF_USERNAME]}"
                     await self.async_set_unique_id(
-                        hashlib.sha256(
-                            user_input[CONF_USERNAME].strip().casefold().encode("utf-8")
-                        ).hexdigest()
+                        _account_unique_id(user_input[CONF_USERNAME])
                     )
                     self._abort_if_unique_id_configured()
                     return self.async_create_entry(title=title, data=full_config)

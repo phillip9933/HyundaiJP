@@ -131,3 +131,65 @@ async def test_reconfigure_pin_updates_saved_token(monkeypatch):
         "pin": "5678",
         "token": {"pin": "5678", "value": "synthetic"},
     }
+
+
+@pytest.mark.parametrize("mode", ["reauth", "reconfigure"])
+async def test_existing_account_rejects_different_username_before_login(
+    monkeypatch, mode
+):
+    flow, manager, constructor = flow_fixture(monkeypatch)
+    entry = SimpleNamespace(
+        unique_id=hashlib.sha256(b"original@example.test").hexdigest(),
+        data={"username": "Original@example.test"},
+        title="My custom car account",
+    )
+    if mode == "reauth":
+        flow.reauth_entry = entry
+    else:
+        flow._is_reconfigure = True
+        flow._get_reconfigure_entry = MagicMock(return_value=entry)
+    flow.async_update_reload_and_abort = MagicMock()
+
+    await flow.async_step_user(
+        {"username": "other@example.test", "password": "synthetic", "pin": "1234"}
+    )
+
+    assert flow.async_show_form.call_args.kwargs["errors"] == {"base": "wrong_account"}
+    constructor.assert_not_called()
+    manager.login.assert_not_called()
+    flow.async_update_reload_and_abort.assert_not_called()
+    assert entry.data == {"username": "Original@example.test"}
+    assert entry.title == "My custom car account"
+
+
+@pytest.mark.parametrize("mode", ["reauth", "reconfigure"])
+async def test_existing_account_accepts_case_and_whitespace_equivalent_username(
+    monkeypatch, mode
+):
+    flow, manager, _ = flow_fixture(monkeypatch)
+    entry = SimpleNamespace(
+        unique_id=hashlib.sha256(b"original@example.test").hexdigest(),
+        data={"username": "Original@example.test"},
+        title="My custom car account",
+    )
+    if mode == "reauth":
+        flow.reauth_entry = entry
+    else:
+        flow._is_reconfigure = True
+        flow._get_reconfigure_entry = MagicMock(return_value=entry)
+    flow.async_update_reload_and_abort = MagicMock(return_value={"type": "abort"})
+
+    result = await flow.async_step_user(
+        {"username": " ORIGINAL@EXAMPLE.TEST ", "password": "new", "pin": "5678"}
+    )
+
+    assert result == {"type": "abort"}
+    assert flow.async_update_reload_and_abort.call_args.args == (entry,)
+    assert (
+        flow.async_update_reload_and_abort.call_args.kwargs["data_updates"]["username"]
+        == " ORIGINAL@EXAMPLE.TEST "
+    )
+    manager.login.assert_called_once()
+    manager.close.assert_called_once()
+    flow.async_set_unique_id.assert_not_awaited()
+    assert entry.title == "My custom car account"

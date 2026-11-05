@@ -37,7 +37,8 @@
     "error": {
       "invalid_auth": "Bluelink login failed. Check your account credentials and PIN.",
       "unknown": "Unexpected error",
-      "invalid_japan_pin": "Enter your Bluelink PIN. Japan requires an explicit PIN for vehicle commands."
+      "invalid_japan_pin": "Enter your Bluelink PIN. Japan requires an explicit PIN for vehicle commands.",
+      "wrong_account": "Sign in with the same Bluelink account. Add a new integration to use another account."
     }
   },
   "options": {
