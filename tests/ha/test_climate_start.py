@@ -1,33 +1,14 @@
-"""Tests that starting climate actually asks the car to switch climate on.
-
-``ClimateRequestOptions.climate`` is serialised by the backends as the
-``airCtrl`` field of the start-climate payload. It used to be seeded from
-``vehicle.air_control_is_on``, which is False in exactly the situation where
-a user reaches for the control -- climate is off and they want it on -- so the
-integration sent a start request carrying ``airCtrl=0`` and the car correctly
-did nothing.
-
-This is easy to miss because the neighbouring code paths are unaffected: the
-``hyundai_jp.start_climate`` service builds its own options object and callers
-pass ``climate: true`` explicitly, and the climate *switch* entity sends a
-bare ``ClimateRequestOptions()`` whose ``climate=None`` the API library then
-defaults to True. Only the climate entity carried the stale False through.
-"""
+"""Climate requests use explicit targets and current telemetry, without I/O."""
 
 from unittest.mock import AsyncMock, MagicMock
 
 from homeassistant.components.climate.const import ClimateEntityFeature, HVACMode
+from homeassistant.exceptions import HomeAssistantError
 import pytest
 
-from custom_components.hyundai_jp import climate
 from custom_components.hyundai_jp._api import Vehicle
 from custom_components.hyundai_jp.climate import HyundaiBluelinkCarClimateControlSwitch
-
-
-@pytest.fixture(autouse=True)
-def _no_restart_delay(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Skip the 5 s wait between stop and start on a temperature change."""
-    monkeypatch.setattr(climate, "asyncio", MagicMock(sleep=AsyncMock()))
+from custom_components.hyundai_jp.coordinator import JapanDataUpdateCoordinator
 
 
 def _entity(air_control_is_on: bool) -> HyundaiBluelinkCarClimateControlSwitch:
@@ -40,7 +21,7 @@ def _entity(air_control_is_on: bool) -> HyundaiBluelinkCarClimateControlSwitch:
     vehicle.steering_wheel_heater_is_on = False
     vehicle.back_window_heater_is_on = False
 
-    coordinator = MagicMock()
+    coordinator = MagicMock(spec=JapanDataUpdateCoordinator)
     coordinator.async_start_climate = AsyncMock()
     coordinator.async_stop_climate = AsyncMock()
 
@@ -91,10 +72,13 @@ async def test_temperature_change_while_on_restarts_with_air_control_on() -> Non
 
     await entity.async_set_temperature(temperature=23)
 
-    entity.coordinator.async_stop_climate.assert_awaited_once_with("v1")
-    _vehicle_id, options = entity.coordinator.async_start_climate.call_args.args
+    _vehicle_id, options = (
+        entity.coordinator.async_change_climate_temperature.call_args.args
+    )
     assert options.climate is True
     assert options.set_temp == 23
+    entity.coordinator.async_stop_climate.assert_not_called()
+    entity.coordinator.async_start_climate.assert_not_called()
 
 
 async def test_turn_on_off_are_supported() -> None:
@@ -121,7 +105,7 @@ async def test_target_temperature_retains_setting_when_air_temp_is_none() -> Non
     vehicle = Vehicle(id="v1", name="test", model="test")
     vehicle.air_control_is_on = False
     vehicle.air_temperature = (None, "C")
-    coordinator = MagicMock()
+    coordinator = MagicMock(spec=JapanDataUpdateCoordinator)
     coordinator.async_start_climate = AsyncMock()
     coordinator.async_stop_climate = AsyncMock()
 
@@ -130,11 +114,11 @@ async def test_target_temperature_retains_setting_when_air_temp_is_none() -> Non
     entity.async_write_ha_state = MagicMock()
 
     # Initial state is None when car reports off and user hasn't set a temperature
-    assert entity.target_temperature is None
+    assert entity.native_target_temperature is None
 
     # User adjusts temperature via slider while off
     await entity.async_set_temperature(temperature=23.5)
-    assert entity.target_temperature == 23.5
+    assert entity.native_target_temperature == 23.5
     coordinator.async_start_climate.assert_not_called()
 
     # Turning on now sends the user-chosen 23.5 target temp
@@ -155,36 +139,177 @@ async def test_set_temperature_with_hvac_mode_starts_climate() -> None:
     assert options.set_temp == 22.5
 
 
-async def test_coordinator_update_syncs_set_temp_only_when_none() -> None:
-    """When vehicle reports air temperature, climate_config is updated if None, but not clobbered."""
-    vehicle = Vehicle(id="v1", name="test", model="test")
-    vehicle.air_control_is_on = False
-    vehicle.air_temperature = (None, "C")
-    coordinator = MagicMock()
-    coordinator.data = {}
+async def test_coordinator_update_preserves_draft_then_settles_confirmed_target() -> (
+    None
+):
+    entity = _entity(air_control_is_on=False)
+    entity.vehicle.air_temperature = (None, "C")
+    entity._last_known_temperature = None
+    assert entity.native_target_temperature is None
 
-    entity = HyundaiBluelinkCarClimateControlSwitch(coordinator, vehicle)
-    entity.hass = MagicMock()
-    entity.async_write_ha_state = MagicMock()
-
-    assert entity.climate_config.set_temp is None
-    assert entity.target_temperature is None
-
-    # Vehicle turns on and reports 25.5 C: coordinator update syncs it because set_temp was None
-    vehicle.air_temperature = (25.5, "C")
+    entity.vehicle.air_temperature = (25.5, "C")
     entity._handle_coordinator_update()
-    assert entity.climate_config.set_temp == 25.5
-    assert entity.target_temperature == 25.5
+    assert entity.native_target_temperature == 25.5
+    entity.vehicle.air_temperature = (None, "C")
+    assert entity.native_target_temperature == 25.5
 
-    # Vehicle turns off (air_temperature becomes None): set_temp is retained
-    vehicle.air_temperature = (None, "C")
-    assert entity.target_temperature == 25.5
-
-    # User adjusts temperature to 26.0 while off
-    entity.climate_config.set_temp = 26.0
-    assert entity.target_temperature == 26.0
-
-    # Stale coordinator update reporting previous 25.5 C does not clobber pending user change
-    vehicle.air_temperature = (25.5, "C")
+    await entity.async_set_temperature(temperature=26)
+    entity.vehicle.air_temperature = (25.5, "C")
     entity._handle_coordinator_update()
-    assert entity.climate_config.set_temp == 26.0
+    assert entity.native_target_temperature == 26
+    await entity.async_turn_on()
+    entity._handle_coordinator_update()
+    assert entity.native_target_temperature == 26
+
+    entity.vehicle.air_temperature = (26, "C")
+    entity._handle_coordinator_update()
+    assert entity._requested_temperature is None
+    entity.vehicle.air_temperature = (24, "C")
+    entity._handle_coordinator_update()
+    assert entity.native_target_temperature == 24
+    await entity.async_turn_on()
+    options = entity.coordinator.async_start_climate.call_args.args[1]
+    assert options.set_temp == 24
+
+
+async def test_start_uses_current_temperature_heaters_and_defrost():
+    entity = _entity(air_control_is_on=False)
+    entity.vehicle.air_temperature = (25, "C")
+    entity.vehicle.defrost_is_on = True
+    entity.vehicle.steering_wheel_heater_is_on = True
+    entity.vehicle.back_window_heater_is_on = True
+    entity._handle_coordinator_update()
+    await entity.async_turn_on()
+    options = entity.coordinator.async_start_climate.call_args.args[1]
+    assert options.set_temp == entity.native_target_temperature == 25
+    assert options.heating == 1
+    assert options.defrost is True
+    assert options.temp_unit == 0
+
+
+async def test_unknown_temperature_requires_explicit_choice_before_start():
+    entity = _entity(air_control_is_on=False)
+    entity.vehicle.air_temperature = (None, None)
+    entity._last_known_temperature = None
+    with pytest.raises(HomeAssistantError, match="Choose a target temperature"):
+        await entity.async_turn_on()
+    entity.coordinator.async_start_climate.assert_not_called()
+    entity.coordinator.async_stop_climate.assert_not_called()
+
+
+async def test_unknown_heater_states_are_not_changed_by_start():
+    entity = _entity(air_control_is_on=False)
+    entity.vehicle.defrost_is_on = None
+    entity.vehicle.steering_wheel_heater_is_on = None
+    entity.vehicle.back_window_heater_is_on = None
+    await entity.async_turn_on()
+    options = entity.coordinator.async_start_climate.call_args.args[1]
+    assert options.heating is None and options.defrost is None
+
+
+async def test_unconfirmed_target_expires_without_hiding_external_changes(monkeypatch):
+    from custom_components.hyundai_jp import climate
+
+    clock = [1.0]
+    monkeypatch.setattr(climate.time, "monotonic", lambda: clock[0])
+    entity = _entity(air_control_is_on=False)
+    await entity.async_set_temperature(temperature=23)
+    await entity.async_turn_on()
+    entity.vehicle.air_temperature = (24, "C")
+    entity._handle_coordinator_update()
+    assert entity.native_target_temperature == 23
+    clock[0] = 122
+    entity._handle_coordinator_update()
+    assert entity.native_target_temperature == 24
+
+
+async def test_target_expiry_publishes_without_waiting_for_next_poll():
+    import asyncio
+
+    entity = _entity(air_control_is_on=False)
+    entity._TEMPERATURE_CONFIRMATION_SECONDS = 0.01
+    await entity.async_set_temperature(temperature=23)
+    await entity.async_turn_on()
+    entity.async_write_ha_state.reset_mock()
+    await asyncio.sleep(0.03)
+    assert entity.native_target_temperature == 21
+    entity.async_write_ha_state.assert_called_once()
+    assert entity._temperature_expiry_handle is None
+
+
+async def test_matching_temperature_cancels_the_pending_expiry():
+    entity = _entity(air_control_is_on=False)
+    await entity.async_set_temperature(temperature=23)
+    await entity.async_turn_on()
+    handle = entity._temperature_expiry_handle
+    assert handle is not None
+    entity.vehicle.air_temperature = (23, "C")
+    entity._handle_coordinator_update()
+    assert handle.cancelled()
+    assert entity._temperature_expiry_handle is None
+
+
+async def test_duplicate_entity_requests_do_not_change_pending_choice():
+    entity = _entity(air_control_is_on=False)
+    async with entity._request_lock:
+        with pytest.raises(HomeAssistantError, match="in progress"):
+            await entity.async_set_temperature(temperature=24)
+    assert entity.native_target_temperature == 21
+
+
+async def test_failed_temperature_command_restores_previous_choice():
+    entity = _entity(air_control_is_on=True)
+    entity.coordinator.async_change_climate_temperature.side_effect = (
+        HomeAssistantError("busy")
+    )
+    with pytest.raises(HomeAssistantError, match="busy"):
+        await entity.async_set_temperature(temperature=24)
+    assert entity.native_target_temperature == 21
+
+
+@pytest.mark.parametrize("value", [True, float("nan"), float("inf"), 100, "21"])
+async def test_invalid_temperature_fails_before_any_command(value):
+    entity = _entity(air_control_is_on=True)
+    with pytest.raises(HomeAssistantError):
+        await entity.async_set_temperature(temperature=value)
+    entity.coordinator.async_change_climate_temperature.assert_not_called()
+    entity.coordinator.async_start_climate.assert_not_called()
+    entity.coordinator.async_stop_climate.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "display_units,requested,expected", [("F", 70, 21), ("C", 21.5, 21.5)]
+)
+async def test_real_ha_temperature_service_converts_user_input_to_celsius(
+    display_units, requested, expected
+):
+    try:
+        from homeassistant.components.climate import async_service_temperature_set
+    except ImportError:
+        from homeassistant.components.climate.services import (
+            _async_service_temperature_set as async_service_temperature_set,
+        )
+    from homeassistant.core import ServiceCall
+    from homeassistant.util.unit_system import METRIC_SYSTEM, US_CUSTOMARY_SYSTEM
+
+    entity = _entity(air_control_is_on=False)
+    entity.vehicle.air_temperature = (None, None)
+    entity._last_known_temperature = None
+    entity.hass.config.units = (
+        US_CUSTOMARY_SYSTEM if display_units == "F" else METRIC_SYSTEM
+    )
+
+    await async_service_temperature_set(
+        entity,
+        ServiceCall(
+            entity.hass,
+            "climate",
+            "set_temperature",
+            {"temperature": requested, "hvac_mode": HVACMode.AUTO},
+        ),
+    )
+
+    options = entity.coordinator.async_start_climate.call_args.args[1]
+    assert options.set_temp == entity.native_target_temperature == expected
+    assert options.temp_unit == 0
+    assert entity.state_attributes["temperature"] == requested

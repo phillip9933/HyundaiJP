@@ -31,7 +31,7 @@ def test_japan_profile_bounds_limit_the_climate_slider(bounds):
 
 @pytest.mark.parametrize(
     "unit,expected",
-    [(UnitOfTemperature.CELSIUS, (14, 30)), (UnitOfTemperature.FAHRENHEIT, (62, 82))],
+    [(UnitOfTemperature.CELSIUS, (14, 30)), (UnitOfTemperature.FAHRENHEIT, (14, 30))],
 )
 def test_unspecified_legacy_range_retains_existing_unit_bounds(unit, expected):
     climate = entity(unit=unit)

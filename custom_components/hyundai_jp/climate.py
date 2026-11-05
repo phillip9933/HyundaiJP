@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, cast
+import math
+import time
+from typing import Any
 
 from homeassistant.components.climate import ClimateEntity, ClimateEntityDescription
 from homeassistant.components.climate.const import (
@@ -15,9 +17,12 @@ from homeassistant.components.climate.const import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.util.unit_conversion import TemperatureConverter
 
 from ._api import ClimateRequestOptions, Vehicle
+from ._api.utils import flag_or_none
 from .const import DOMAIN
 from .coordinator import JapanDataUpdateCoordinator
 from .entity import HyundaiBluelinkEntity
@@ -53,117 +58,160 @@ class HyundaiBluelinkCarClimateControlSwitch(HyundaiBluelinkEntity, ClimateEntit
 
     vehicle: Vehicle
 
-    # The python lib climate request is also treated as
-    # internal target state that can be sent to the car
-    climate_config: ClimateRequestOptions
-
-    def get_internal_heat_int_for_climate_request(self) -> int:
-        """Map the current rear window / steering wheel heater state to the API heating code."""
-        if (
-            self.vehicle.steering_wheel_heater_is_on
-            and self.vehicle.back_window_heater_is_on
-        ):
-            return 1
-        elif self.vehicle.back_window_heater_is_on:
-            return 2
-        elif self.vehicle.steering_wheel_heater_is_on:
-            return 3
-        else:
-            return 0
+    _TEMPERATURE_CONFIRMATION_SECONDS = 120
 
     def __init__(
         self,
         coordinator: JapanDataUpdateCoordinator,
         vehicle: Vehicle,
     ) -> None:
-        """Initialize the Climate Control."""
+        """Keep explicit user choices separate from the latest vehicle data."""
         super().__init__(coordinator, vehicle)
         self.entity_description = ClimateEntityDescription(
             key="climate_control",
             translation_key="climate_control",
             icon="mdi:air-conditioner",
-            unit_of_measurement=vehicle._air_temperature_unit,
+            unit_of_measurement=UnitOfTemperature.CELSIUS,
         )
         self._attr_unique_id = f"{DOMAIN}_{vehicle.id}_climate_control"
+        self._request_lock = asyncio.Lock()
+        self._requested_temperature: float | None = None
+        self._temperature_confirmation_deadline: float | None = None
+        self._temperature_expiry_handle: asyncio.TimerHandle | None = None
+        self._last_known_temperature = self._vehicle_temperature()
+        self.async_on_remove(self._cancel_temperature_expiry)
 
-        # set the Climate Request to the current actual state of the car
-        #
-        # `climate` is deliberately NOT seeded from air_control_is_on: this
-        # object is only ever used as the payload of a *start* request, and
-        # the backends serialise it as `airCtrl`. Seeding it from the car's
-        # current state meant that whenever climate was off -- i.e. exactly
-        # when you want to start it -- we sent a start request carrying
-        # airCtrl=0 and the car correctly did nothing.
-        self.climate_config = ClimateRequestOptions(
-            set_temp=self.vehicle.air_temperature,
-            climate=True,
-            heating=self.get_internal_heat_int_for_climate_request(),
-            defrost=self.vehicle.defrost_is_on,
-        )
+    def _vehicle_temperature(self) -> float | None:
+        """Normalize known telemetry to the Celsius accepted by Japan commands."""
+        value = self.vehicle.air_temperature
+        if isinstance(value, bool) or not isinstance(value, (float, int)):
+            return None
+        if not math.isfinite(value):
+            return None
+        unit = self.vehicle._air_temperature_unit
+        if unit in ("F", UnitOfTemperature.FAHRENHEIT):
+            return TemperatureConverter.convert(
+                value, UnitOfTemperature.FAHRENHEIT, UnitOfTemperature.CELSIUS
+            )
+        if unit in (None, "C", UnitOfTemperature.CELSIUS):
+            return float(value)
+        return None
+
+    def _sync_temperature_choice(self) -> None:
+        """Settle a sent choice only on a matching reading or bounded expiry."""
+        current = self._vehicle_temperature()
+        if current is not None:
+            self._last_known_temperature = current
+        deadline = self._temperature_confirmation_deadline
+        if deadline is not None and (
+            current == self._requested_temperature or time.monotonic() >= deadline
+        ):
+            self._requested_temperature = None
+            self._temperature_confirmation_deadline = None
+            self._cancel_temperature_expiry()
+
+    def _cancel_temperature_expiry(self) -> None:
+        if self._temperature_expiry_handle is not None:
+            self._temperature_expiry_handle.cancel()
+            self._temperature_expiry_handle = None
+
+    def _schedule_temperature_expiry(self) -> None:
+        self._cancel_temperature_expiry()
+        deadline = self._temperature_confirmation_deadline
+        if deadline is not None:
+            self._temperature_expiry_handle = asyncio.get_running_loop().call_later(
+                max(0, deadline - time.monotonic()), self._expire_temperature_choice
+            )
+
+    def _expire_temperature_choice(self) -> None:
+        """Publish expiry even when no new car telemetry arrives."""
+        self._temperature_expiry_handle = None
+        self._requested_temperature = None
+        self._temperature_confirmation_deadline = None
+        self._sync_temperature_choice()
+        self.async_write_ha_state()
 
     @property
     def native_temperature_unit(self) -> str:
-        """Get the Cars Climate Control Temperature Unit."""
-        if self.vehicle._air_temperature_unit:
-            return UnitOfTemperature(self.vehicle._air_temperature_unit)
-        # The library has no unit until the car reports a setpoint (e.g.
-        # airTemp "OFF" at startup), so fall back to HA's unit system.
-        if self.hass is not None:
-            return self.hass.config.units.temperature_unit
+        """Japan commands are Celsius-native; HA converts display and input."""
         return UnitOfTemperature.CELSIUS
 
     @property
     def native_current_temperature(self) -> float | None:
-        """Return the current in-car temperature, or None.
-
-        The API exposes only the HVAC setpoint (`air_temperature`); the
-        vehicleStatus payload carries no cabin temperature, so there is
-        nothing honest to report here (issue #1871).
-        """
+        """The API reports a setpoint, not an observed cabin temperature."""
         return None
 
     @property
     def native_target_temperature(self) -> float | None:
-        """Get the desired in-car target temperature."""
-        if self.vehicle.air_temperature is not None:
-            return cast(float | None, self.vehicle.air_temperature)
-        return self.climate_config.set_temp
+        """Show the same explicit choice that the next request will send."""
+        self._sync_temperature_choice()
+        if self._requested_temperature is not None:
+            return self._requested_temperature
+        return self._last_known_temperature
 
     @property
-    def target_temperature_step(self) -> float | None:
-        """Get the step size for adjusting the in-car target temperature."""
-        # Fahrenheit setpoints are whole degrees; Celsius ones take halves.
-        if self.native_temperature_unit == UnitOfTemperature.FAHRENHEIT:
-            return 1
+    def target_temperature_step(self) -> float:
         return 0.5
 
     @property
     def min_temp(self) -> float:
-        """Get the minimum settable temperature."""
         bounds = self.vehicle.supports.climate_temperature_range
-        if bounds is not None:
-            return bounds[0]
-        # Older profiles may omit bounds; preserve the unit defaults.
-        # USA/CA report Fahrenheit; the hardcoded 14-30 °C bounds made the
-        # climate slider unusable (14-30 °F) for those vehicles.
-        if self.native_temperature_unit == UnitOfTemperature.FAHRENHEIT:
-            return 62
-        return 14
+        return bounds[0] if bounds is not None else 14
 
     @property
     def max_temp(self) -> float:
-        """Get the maximum settable temperature."""
         bounds = self.vehicle.supports.climate_temperature_range
-        if bounds is not None:
-            return bounds[1]
-        # Older profiles may omit bounds; preserve the unit defaults.
-        if self.native_temperature_unit == UnitOfTemperature.FAHRENHEIT:
-            return 82
-        return 30
+        return bounds[1] if bounds is not None else 30
+
+    def _validated_temperature(self, value: Any) -> float:
+        """Quantize HA's converted input to the supported half-degree step."""
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (float, int))
+            or not math.isfinite(value)
+        ):
+            raise HomeAssistantError(
+                "Choose a target temperature before starting climate"
+            )
+        if not self.min_temp <= value <= self.max_temp:
+            raise HomeAssistantError(
+                "Target temperature is outside the vehicle's supported range"
+            )
+        return math.floor(float(value) * 2 + 0.5) / 2
+
+    def _build_climate_request(self) -> ClimateRequestOptions:
+        """Use current heater/defrost state, never a startup snapshot."""
+        temperature = self._validated_temperature(self.native_target_temperature)
+        wheel = flag_or_none(self.vehicle.steering_wheel_heater_is_on)
+        rear = flag_or_none(self.vehicle.back_window_heater_is_on)
+        heating = None
+        if isinstance(wheel, bool) and isinstance(rear, bool):
+            heating = 1 if wheel and rear else 2 if rear else 3 if wheel else 0
+        defrost = flag_or_none(self.vehicle.defrost_is_on)
+        return ClimateRequestOptions(
+            set_temp=temperature,
+            temp_unit=0,
+            climate=True,
+            heating=heating,
+            defrost=defrost if isinstance(defrost, bool) else None,
+        )
+
+    def _mark_temperature_submitted(self) -> None:
+        if self._requested_temperature is not None:
+            self._temperature_confirmation_deadline = (
+                time.monotonic() + self._TEMPERATURE_CONFIRMATION_SECONDS
+            )
+            self._schedule_temperature_expiry()
+
+    def _require_idle_request(self) -> None:
+        if self._request_lock.locked():
+            raise HomeAssistantError("Another climate request is in progress")
 
     @property
     def hvac_mode(self) -> HVACMode | None:
         """Get the configured climate control operation mode."""
+        if self.vehicle.air_control_is_on is None:
+            return None
         if not self.vehicle.air_control_is_on:
             return HVACMode.OFF
 
@@ -205,59 +253,71 @@ class HyundaiBluelinkCarClimateControlSwitch(HyundaiBluelinkEntity, ClimateEntit
         await self.async_set_hvac_mode(HVACMode.AUTO)
 
     def _handle_coordinator_update(self) -> None:
-        """Handle updated data from the coordinator."""
-        if (
-            self.vehicle.air_temperature is not None
-            and self.climate_config.set_temp is None
-        ):
-            self.climate_config.set_temp = self.vehicle.air_temperature
+        self._sync_temperature_choice()
         super()._handle_coordinator_update()
 
     async def async_turn_off(self) -> None:
-        """Turn the in-car climate control off."""
         await self.async_set_hvac_mode(HVACMode.OFF)
 
-    async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
-        """Set the operation mode of the in-car climate control."""
+    async def _async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         if hvac_mode == HVACMode.OFF:
             await self.coordinator.async_stop_climate(self.vehicle.id)
+        elif hvac_mode in (HVACMode.AUTO, HVACMode.HEAT, HVACMode.COOL):
+            options = self._build_climate_request()
+            try:
+                await self.coordinator.async_start_climate(self.vehicle.id, options)
+            except asyncio.CancelledError:
+                self._mark_temperature_submitted()
+                raise
+            self._mark_temperature_submitted()
         else:
-            # The car has no heat/cool mode of its own -- it is given a
-            # target temperature and decides -- so HEAT and COOL map onto
-            # the same request. Force airCtrl on: the request may have
-            # been left with climate=False by a previous stop.
-            self.climate_config.climate = True
-            await self.coordinator.async_start_climate(
-                self.vehicle.id, self.climate_config
-            )
+            raise HomeAssistantError("Unsupported climate mode")
+
+    async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
+        self._require_idle_request()
+        async with self._request_lock:
+            await self._async_set_hvac_mode(hvac_mode)
         self.async_write_ha_state()
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
-        """Set the desired in-car temperature. Does not turn on the AC."""
-        if (hvac_mode := kwargs.get(ATTR_HVAC_MODE)) is not None:
-            if kwargs.get(ATTR_TEMPERATURE) is not None:
-                self.climate_config.set_temp = kwargs.get(ATTR_TEMPERATURE)
-            await self.async_set_hvac_mode(hvac_mode)
-            return
-
-        old_temp = self.climate_config.set_temp
-        self.climate_config.set_temp = kwargs.get(ATTR_TEMPERATURE)
-
-        # activation is controlled separately, but if system is turned on
-        # and temp has changed, send update to car
-        if self.hvac_mode != HVACMode.OFF and old_temp != self.climate_config.set_temp:
-            # Car does not accept changing the temp after starting the heating. So we have to turn off first
-            await self.coordinator.async_stop_climate(self.vehicle.id)
-            # Wait, because the car ignores the start_climate command if it comes too fast after stopping
-            # TODO: replace with some more event driven method
-            await asyncio.sleep(5)
-            # Same reason as in async_set_hvac_mode: without this the
-            # stop/start cycle would stop the climate and fail to bring
-            # it back.
-            self.climate_config.climate = True
-            await self.coordinator.async_start_climate(
-                self.vehicle.id, self.climate_config
+        """Keep a draft while off; serialize a complete stop/wait/start while on."""
+        self._require_idle_request()
+        async with self._request_lock:
+            previous = (
+                self._requested_temperature,
+                self._temperature_confirmation_deadline,
             )
+            old_temperature = self.native_target_temperature
+            value = kwargs.get(ATTR_TEMPERATURE)
+            if value is not None:
+                self._requested_temperature = self._validated_temperature(value)
+                self._temperature_confirmation_deadline = None
+                self._cancel_temperature_expiry()
+            elif kwargs.get(ATTR_HVAC_MODE) is None:
+                raise HomeAssistantError("Provide a target temperature")
+            try:
+                if (hvac_mode := kwargs.get(ATTR_HVAC_MODE)) is not None:
+                    await self._async_set_hvac_mode(hvac_mode)
+                elif (
+                    self.vehicle.air_control_is_on is True
+                    and old_temperature != self._requested_temperature
+                ):
+                    options = self._build_climate_request()
+                    await self.coordinator.async_change_climate_temperature(
+                        self.vehicle.id, options
+                    )
+                    self._mark_temperature_submitted()
+            except asyncio.CancelledError:
+                # Coordinator cancellation waits for its owned operation. Keep
+                # any submitted target bounded until matching telemetry arrives.
+                self._mark_temperature_submitted()
+                raise
+            except Exception:
+                self._requested_temperature, self._temperature_confirmation_deadline = (
+                    previous
+                )
+                self._schedule_temperature_expiry()
+                raise
         self.async_write_ha_state()
 
     # Home Assistant before 2026.11 reads the legacy property names.

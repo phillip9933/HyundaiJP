@@ -1,4 +1,4 @@
-"""Native temperatures must retain vehicle units without deprecated reads."""
+"""Japan stays Celsius-native while HA converts display units."""
 
 from unittest.mock import MagicMock
 
@@ -14,7 +14,7 @@ from custom_components.hyundai_jp.climate import HyundaiBluelinkCarClimateContro
     ("unit", "value", "ha_units", "bounds", "step", "displayed"),
     [
         (UnitOfTemperature.CELSIUS, 20, US_CUSTOMARY_SYSTEM, (14, 30), 0.5, 68),
-        (UnitOfTemperature.FAHRENHEIT, 68, METRIC_SYSTEM, (62, 82), 1, 20),
+        (UnitOfTemperature.FAHRENHEIT, 68, METRIC_SYSTEM, (14, 30), 0.5, 20),
     ],
 )
 def test_native_temperature_preserves_units_and_display(
@@ -28,8 +28,8 @@ def test_native_temperature_preserves_units_and_display(
     entity.hass.config.units = ha_units
 
     caplog.clear()
-    assert entity.native_temperature_unit == unit
-    assert entity.native_target_temperature == value
+    assert entity.native_temperature_unit == UnitOfTemperature.CELSIUS
+    assert entity.native_target_temperature == 20
     assert entity.native_current_temperature is None
     assert (entity.min_temp, entity.max_temp) == bounds
     assert entity.target_temperature_step == step
