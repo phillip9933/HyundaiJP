@@ -9,6 +9,7 @@ from custom_components.hyundai_jp._api.VehicleManager import VehicleManager
 class DummyApi:
     def __init__(self):
         self.login_calls = 0
+        self.refresh_calls = 0
 
     def login(self, username, password, pin=None):
         self.login_calls += 1
@@ -22,7 +23,11 @@ class DummyApi:
         return []
 
     def refresh_access_token(self, token):
-        return self.login(token.username, token.password, token.pin)
+        self.refresh_calls += 1
+        return Token(
+            username=token.username,
+            valid_until=dt.datetime.now(dt.UTC) + dt.timedelta(minutes=1),
+        )
 
 
 def test_check_and_refresh_token_handles_min_datetime(monkeypatch):
@@ -42,7 +47,8 @@ def test_check_and_refresh_token_handles_min_datetime(monkeypatch):
         username="test-user", password="test-pass", valid_until=dt.datetime.min
     )
     assert manager.check_and_refresh_token() is True
-    assert dummy_api.login_calls == 1
+    assert dummy_api.refresh_calls == 1
+    assert dummy_api.login_calls == 0
 
 
 def test_login_returns_false_without_token(monkeypatch):

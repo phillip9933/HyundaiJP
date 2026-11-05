@@ -141,7 +141,9 @@ def test_refresh_preserves_device_and_refresh_token(api):
     assert renewed.device_id == "device"
     assert renewed.refresh_token == "refresh"
     assert renewed.pin == "1234"
+    assert "password" not in renewed.to_dict()
     assert api.session.request.call_args.kwargs["data"]["grant_type"] == "refresh_token"
+    assert "password" not in api.session.request.call_args.kwargs["data"]
 
 
 @pytest.mark.parametrize(

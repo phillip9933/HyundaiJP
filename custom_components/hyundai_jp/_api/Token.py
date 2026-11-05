@@ -1,6 +1,6 @@
 """Token.py"""
 
-from dataclasses import asdict, dataclass
+from dataclasses import InitVar, asdict, dataclass
 import datetime as dt
 from typing import Any
 
@@ -10,7 +10,9 @@ class Token:
     """Token"""
 
     username: str
-    password: str
+    # Accept legacy construction without retaining a second password. The
+    # actual login credential belongs to the account config/VehicleManager.
+    password: InitVar[str | None] = None
     access_token: str | None = None
     refresh_token: str | None = None
     device_id: str | None = None
@@ -44,7 +46,6 @@ class Token:
 
         return cls(
             username=data["username"],
-            password=data["password"],
             access_token=data.get("access_token"),
             refresh_token=data.get("refresh_token"),
             device_id=data.get("device_id"),

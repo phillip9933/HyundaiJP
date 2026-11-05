@@ -183,7 +183,6 @@ class JapanAuthClient:
         self,
         grant: dict[str, Any],
         username: str,
-        password: str,
         device_id: str | None,
         pin: str | None,
     ) -> Token:
@@ -220,7 +219,6 @@ class JapanAuthClient:
             ) from None
         return Token(
             username=username,
-            password=password,
             access_token=f"{token_type} {access}",
             refresh_token=refresh,
             device_id=device_id,
@@ -292,7 +290,6 @@ class JapanAuthClient:
         token = self._exchange_token(
             {"grant_type": "authorization_code", "code": code[0]},
             username,
-            password,
             None,
             pin,
         )
@@ -324,7 +321,6 @@ class JapanAuthClient:
         refreshed = self._exchange_token(
             {"grant_type": "refresh_token", "refresh_token": token.refresh_token},
             token.username,
-            token.password,
             token.device_id,
             token.pin,
         )

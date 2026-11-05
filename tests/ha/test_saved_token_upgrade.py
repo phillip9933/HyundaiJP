@@ -28,9 +28,9 @@ async def test_saved_token_upgrade_ignores_old_metadata_without_reauth(monkeypat
         "region": 10,
         "brand": 2,
         "username": token.username,
-        "password": token.password,
+        "password": "synthetic-password",
         "pin": token.pin,
-        "token": token.to_dict(),
+        "token": {**token.to_dict(), "password": "synthetic-legacy-copy"},
     }
     entry = SimpleNamespace(
         entry_id="synthetic-entry",
@@ -70,7 +70,11 @@ async def test_saved_token_upgrade_ignores_old_metadata_without_reauth(monkeypat
         get_vehicles.assert_called_once_with(manager.token)
         login.assert_not_called()
         refresh.assert_not_called()
-        hass.config_entries.async_update_entry.assert_not_called()
-        assert entry.data == data
+        hass.config_entries.async_update_entry.assert_called_once_with(
+            entry, data={**data, "token": token.to_dict()}
+        )
+        saved_data = hass.config_entries.async_update_entry.call_args.kwargs["data"]
+        assert "password" not in saved_data["token"]
+        assert saved_data["password"] == "synthetic-password"
     finally:
         manager.close()

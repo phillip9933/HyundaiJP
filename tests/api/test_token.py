@@ -1,6 +1,7 @@
 """Token serialization."""
 
 import datetime as dt
+from dataclasses import asdict
 
 from custom_components.hyundai_jp._api.Token import Token
 
@@ -16,6 +17,31 @@ def test_round_trip_keeps_valid_until() -> None:
     valid_until = dt.datetime(2026, 11, 1, 12, 0, tzinfo=dt.UTC)
     token = Token(username="user", password="pass", valid_until=valid_until)
     assert Token.from_dict(token.to_dict()).valid_until == valid_until
+
+
+def test_legacy_password_is_accepted_without_retaining_or_exporting_it():
+    secret = "SYNTHETIC_LEGACY_PASSWORD"
+    token = Token(username="user", password=secret)
+    assert "password" not in vars(token)
+    assert "password" not in asdict(token)
+    assert "password" not in token.to_dict()
+    assert secret not in repr(token)
+
+
+def test_saved_tokens_load_with_or_without_legacy_password():
+    legacy = {
+        "username": "synthetic-user",
+        "password": "SYNTHETIC_LEGACY_PASSWORD",
+        "access_token": "synthetic-access",
+        "refresh_token": "synthetic-refresh",
+        "mqtt_registration_uuid": "synthetic-registration",
+    }
+    token = Token.from_dict(legacy)
+    assert "password" not in token.to_dict()
+    assert token.access_token == legacy["access_token"]
+    assert token.refresh_token == legacy["refresh_token"]
+    assert token.mqtt_registration_uuid == legacy["mqtt_registration_uuid"]
+    assert Token.from_dict(token.to_dict()) == token
 
 
 def test_japan_identity_survives_round_trip_without_discarded_auth_fields():
