@@ -11,7 +11,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 import pytest
 
-from custom_components.hyundai_jp import command_state
+from custom_components.hyundai_jp import button, command_state
 from custom_components.hyundai_jp._api import Vehicle, VehicleManager
 from custom_components.hyundai_jp._api.const import ORDER_STATUS
 from custom_components.hyundai_jp._api.exceptions import RequestTimeoutError
@@ -274,3 +274,95 @@ def test_legacy_port_switch_preserves_unique_id_and_only_sets_new_entry_defaults
     assert switch.entity_registry_visible_default is False
     assert switch.entity_registry_enabled_default is True
     assert switch.translation_key == "ev_charge_port_door_legacy"
+
+
+def make_port_button(coordinator, vehicle):
+    description = next(
+        item for item in button.BUTTON_DESCRIPTIONS if item.key == "charge_port_toggle"
+    )
+    return button.HyundaiBluelinkButton(coordinator, description, vehicle)
+
+
+@pytest.mark.parametrize("is_open", [False, True])
+async def test_port_button_sends_one_opposite_action_and_waits_for_status(
+    controls, is_open
+):
+    coordinator, manager, vehicle, _, port, _ = controls
+    vehicle.ev_charge_port_door_is_open = is_open
+    control = make_port_button(coordinator, vehicle)
+    assert control.icon == ("mdi:door-open" if is_open else "mdi:door-closed")
+    assert port.entity_category == EntityCategory.CONFIG
+    baseline = vehicle.last_updated_at
+    await control.async_press()
+    assert port.state == ("closing" if is_open else "opening")
+    chosen = manager.close_charge_port if is_open else manager.open_charge_port
+    other = manager.open_charge_port if is_open else manager.close_charge_port
+    chosen.assert_called_once_with(vehicle.id)
+    other.assert_not_called()
+    # A second press must not submit another request based on stale position.
+    with pytest.raises(HomeAssistantError, match="awaiting confirmation"):
+        await control.async_press()
+    chosen.assert_called_once()
+    other.assert_not_called()
+    vehicle.ev_charge_port_door_is_open = not is_open
+    vehicle.last_updated_at = baseline + dt.timedelta(seconds=1)
+    coordinator.async_update_listeners()
+    assert port.state == ("closed" if is_open else "open")
+    assert control.icon == ("mdi:door-closed" if is_open else "mdi:door-open")
+    # After a confirmed update, the next press correctly chooses the other action.
+    await control.async_press()
+    other.assert_called_once_with(vehicle.id)
+    manager.force_refresh_vehicle_state.assert_not_called()
+
+
+async def test_port_button_does_not_guess_unknown_position_or_send_a_request(controls):
+    coordinator, manager, vehicle, _, _, _ = controls
+    control = make_port_button(coordinator, vehicle)
+    vehicle.ev_charge_port_door_is_open = None
+    assert control.icon == "mdi:door"
+    with pytest.raises(HomeAssistantError, match="position is unknown"):
+        await control.async_press()
+    manager.open_charge_port.assert_not_called()
+    manager.close_charge_port.assert_not_called()
+    coordinator.hass.async_add_executor_job.assert_not_awaited()
+
+
+async def test_port_button_rejects_busy_account_without_sending(controls):
+    coordinator, manager, vehicle, _, _, _ = controls
+    control = make_port_button(coordinator, vehicle)
+    async with coordinator._action_lock:
+        with pytest.raises(HomeAssistantError, match="Another vehicle action"):
+            await control.async_press()
+    manager.open_charge_port.assert_not_called()
+    manager.close_charge_port.assert_not_called()
+
+
+async def test_port_button_preserves_unknown_submission_and_does_not_replay(controls):
+    coordinator, manager, vehicle, _, port, _ = controls
+    control = make_port_button(coordinator, vehicle)
+    manager.open_charge_port.side_effect = RequestTimeoutError("synthetic timeout")
+    with pytest.raises(HomeAssistantError, match="execution is unknown"):
+        await control.async_press()
+    assert port.state == "opening"
+    with pytest.raises(HomeAssistantError, match="awaiting confirmation"):
+        await control.async_press()
+    manager.open_charge_port.assert_called_once()
+    manager.close_charge_port.assert_not_called()
+
+
+@pytest.mark.parametrize("position", [True, False, None])
+async def test_port_button_setup_follows_reported_port_support(position):
+    vehicle = Vehicle(id="synthetic", ev_charge_port_door_is_open=position)
+    coordinator = make_coordinator(vehicle)
+    hass, entry = make_hass(coordinator)
+    created = []
+    await button.async_setup_entry(hass, entry, created.extend)
+    controls = [e for e in created if e.entity_description.key == "charge_port_toggle"]
+    assert len(controls) == (0 if position is None else 1)
+    if controls:
+        assert controls[0].unique_id == "hyundai_jp_synthetic_charge_port_toggle"
+        assert controls[0].entity_registry_enabled_default is True
+        assert controls[0].entity_category is None
+        assert controls[0].translation_key == "charge_port_toggle"
+    refresh = next(e for e in created if e.entity_description.key == "force_refresh")
+    assert refresh.icon == "mdi:refresh"

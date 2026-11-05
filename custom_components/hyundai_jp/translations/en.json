@@ -820,6 +820,9 @@
       },
       "capture_svm_image": {
         "name": "Capture SVM Image"
+      },
+      "charge_port_toggle": {
+        "name": "Charge Port"
       }
     },
     "image": {
@@ -853,7 +856,7 @@
         "name": "Back Right Window"
       },
       "charge_port": {
-        "name": "Charge Port"
+        "name": "Charge Port Status"
       }
     },
     "switch": {

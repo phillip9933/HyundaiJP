@@ -164,6 +164,7 @@ class HyundaiBluelinkChargePortCover(CoverEntity, HyundaiBluelinkEntity):
     _attr_supported_features = CoverEntityFeature.OPEN | CoverEntityFeature.CLOSE
     _attr_device_class = CoverDeviceClass.DOOR
     _attr_translation_key = "charge_port"
+    _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(
         self, coordinator: JapanDataUpdateCoordinator, vehicle: Vehicle

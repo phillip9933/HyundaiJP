@@ -1038,6 +1038,23 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[None]):
             pending_target=False,
         )
 
+    async def async_toggle_charge_port(self, vehicle_id: str) -> None:
+        """Choose one port action from reported state, retaining command guards."""
+        self._ensure_not_closing()
+        is_open = self.vehicle_manager.get_vehicle(
+            vehicle_id
+        ).ev_charge_port_door_is_open
+        if is_open is None:
+            raise HomeAssistantError(
+                "Charge port position is unknown. Refresh status before toggling it."
+            )
+        # These methods enter the action lock before yielding, and the pending
+        # tracker rejects another request until fresh telemetry confirms it.
+        if is_open:
+            await self.async_close_charge_port(vehicle_id)
+        else:
+            await self.async_open_charge_port(vehicle_id)
+
     async def async_open_charge_port(self, vehicle_id: str) -> None:
         await self._async_send_action(
             vehicle_id,

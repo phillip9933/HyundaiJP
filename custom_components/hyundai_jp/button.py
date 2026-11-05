@@ -23,9 +23,23 @@ class HyundaiBluelinkButtonDescription(ButtonEntityDescription):
     press_action: str
     exists_fn: Callable[[Vehicle], bool] = lambda _: True
     enabled_fn: Callable[[Vehicle], bool] = lambda _: True
+    icon_fn: Callable[[Vehicle], str | None] | None = None
 
 
 BUTTON_DESCRIPTIONS: Final[tuple[HyundaiBluelinkButtonDescription, ...]] = (
+    HyundaiBluelinkButtonDescription(
+        key="charge_port_toggle",
+        translation_key="charge_port_toggle",
+        press_action="async_toggle_charge_port",
+        exists_fn=lambda vehicle: vehicle.ev_charge_port_door_is_open is not None,
+        icon_fn=lambda vehicle: (
+            "mdi:door"
+            if vehicle.ev_charge_port_door_is_open is None
+            else "mdi:door-open"
+            if vehicle.ev_charge_port_door_is_open
+            else "mdi:door-closed"
+        ),
+    ),
     HyundaiBluelinkButtonDescription(
         key="force_refresh",
         translation_key="force_refresh",
@@ -137,6 +151,12 @@ class HyundaiBluelinkButton(ButtonEntity, HyundaiBluelinkEntity):
         self._attr_unique_id = f"{DOMAIN}_{vehicle.id}_{self._key}"
         self._attr_icon = description.icon
         self._attr_entity_registry_enabled_default = description.enabled_fn(vehicle)
+
+    @property
+    def icon(self) -> str | None:
+        """Use current vehicle state for buttons with a stateful icon."""
+        icon_fn = self.entity_description.icon_fn
+        return icon_fn(self.vehicle) if icon_fn is not None else self._attr_icon
 
     async def async_press(self) -> None:
         """Run the coordinator action bound to this button."""
