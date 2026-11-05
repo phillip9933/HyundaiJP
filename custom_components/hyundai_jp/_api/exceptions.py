@@ -1,19 +1,19 @@
 """exceptions.py"""
 
 
-class HyundaiKiaException(Exception):
+class BluelinkError(Exception):
     """
-    Generic hyundaiKiaException exception.
+    Base exception for Japan Bluelink failures.
     """
 
 
-class AuthenticationError(HyundaiKiaException):
+class AuthenticationError(BluelinkError):
     """
     Raised upon receipt of an authentication error.
     """
 
 
-class APIError(HyundaiKiaException):
+class APIError(BluelinkError):
     """
     Generic API error
     """
@@ -27,8 +27,7 @@ class RateLimitingError(APIError):
 
 class NoDataFound(APIError):
     """
-    Raised when the API doesn't have data for that car.
-    Disabling the car is the solution.
+    Raised when a requested status, capture or optional data is not available.
     """
 
 

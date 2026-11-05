@@ -2,11 +2,11 @@
 
 from types import SimpleNamespace
 
-from custom_components.hyundai_jp._api.KiaUvoApiJP import KiaUvoApiJP
+from custom_components.hyundai_jp._api.client import HyundaiBluelinkApi
 
 
 def test_local_diagnostics_are_bounded_and_do_not_serialize_authentication():
-    api = KiaUvoApiJP()
+    api = HyundaiBluelinkApi()
     helper = SimpleNamespace(diagnostics={"closed": True, "result_messages": 0})
     api._mqtt_sessions = {
         str(index): (("synthetic-secret-token",), helper) for index in range(12)
@@ -19,7 +19,7 @@ def test_local_diagnostics_are_bounded_and_do_not_serialize_authentication():
 
 
 def test_local_diagnostics_before_any_capture_or_connection():
-    api = KiaUvoApiJP()
+    api = HyundaiBluelinkApi()
     api._mqtt_sessions = {}
     assert api.get_local_diagnostics() == {
         "mqtt_sessions": [],

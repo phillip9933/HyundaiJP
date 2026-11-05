@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from custom_components.hyundai_jp._api.ApiImpl import POICoord, POIInfo
+from custom_components.hyundai_jp._api.options import POICoord, POIInfo
 
 # --- Minimal stubs (no HA dependency) ---
 

@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from custom_components.hyundai_jp._api.client import HyundaiBluelinkApi
 from custom_components.hyundai_jp._api.exceptions import (
     AuthenticationError,
     InvalidAPIResponseError,
@@ -15,7 +16,7 @@ from custom_components.hyundai_jp._api.exceptions import (
     SafetyAcknowledgmentError,
     UnsupportedControlError,
 )
-from custom_components.hyundai_jp._api.japan_svm import JapanSVM, parse_japan_svm
+from custom_components.hyundai_jp._api.japan_svm import parse_japan_svm
 from custom_components.hyundai_jp._api.Vehicle import Vehicle, VehicleSupports
 
 
@@ -34,10 +35,10 @@ def payload():
 
 @pytest.fixture
 def adapter():
-    api = JapanSVM()
+    api = HyundaiBluelinkApi()
     api.data_timezone = ZoneInfo("Asia/Tokyo")
     api._headers = Mock(return_value={"Authorization": "SYNTHETIC_TOKEN"})
-    api._control_headers = Mock(
+    api._get_control_headers = Mock(
         return_value={"Authorization": "SYNTHETIC_CONTROL_TOKEN"}
     )
     api._vehicle_headers = Mock(
@@ -108,7 +109,7 @@ def test_poll_is_correlated_and_only_retries_pending(adapter, monkeypatch):
     assert adapter._request.call_count == 3
     calls = adapter._request.call_args_list
     assert calls[0].args == ("POST", "/api/v1/spa/vehicles/CAR/svm/async")
-    adapter._control_headers.assert_called_once_with(None, vehicle)
+    adapter._get_control_headers.assert_called_once_with(None, vehicle)
     assert all(
         call.kwargs["headers"]["Authorization"] == "SYNTHETIC_OAUTH_TOKEN"
         for call in calls
@@ -120,7 +121,7 @@ def test_poll_is_correlated_and_only_retries_pending(adapter, monkeypatch):
 
 
 def test_pin_precondition_failure_never_submits_or_polls_camera(adapter):
-    adapter._control_headers.side_effect = AuthenticationError("PIN rejected")
+    adapter._get_control_headers.side_effect = AuthenticationError("PIN rejected")
     with pytest.raises(AuthenticationError):
         adapter.request_svm_capture(
             None, Vehicle(id="CAR", supports=VehicleSupports(svm=True)), True
@@ -131,7 +132,7 @@ def test_pin_precondition_failure_never_submits_or_polls_camera(adapter):
 
 def test_pin_precondition_precedes_camera_oauth_context_and_post(adapter):
     order = []
-    adapter._control_headers.side_effect = lambda token, vehicle: (
+    adapter._get_control_headers.side_effect = lambda token, vehicle: (
         order.append("PIN") or {"Authorization": "CONTROL"}
     )
     adapter._vehicle_headers.side_effect = lambda token, vehicle: (
@@ -255,7 +256,7 @@ def test_workflow_diagnostics_track_pending_and_success_without_private_data(
     ],
 )
 def test_workflow_diagnostics_preserve_safe_failure(adapter, failure, category):
-    adapter._control_headers.side_effect = failure
+    adapter._get_control_headers.side_effect = failure
     with pytest.raises(type(failure)):
         adapter.request_svm_capture(
             None, Vehicle(id="PRIVATE_CAR", supports=VehicleSupports(svm=True)), True

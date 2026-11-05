@@ -1,16 +1,16 @@
-"""Japan-only vehicle API bundled with HyundaiJP."""
+"""Japan-only vehicle API bundled with Hyundai Bluelink JP."""
 
 import json
 from pathlib import Path
 
-from .ApiImpl import (
+from .const import WINDOW_STATE
+from .options import (
     ClimateRequestOptions,
     POICoord,
     POIInfo,
     ScheduleChargingClimateRequestOptions,
     WindowRequestOptions,
 )
-from .const import WINDOW_STATE
 from .svm import SVMDetails
 from .Token import Token
 from .Vehicle import Vehicle, VehicleSupports

@@ -22,7 +22,7 @@ def repository(tmp_path: Path) -> Path:
         "__init__.py",
         "config_flow.py",
         "_api/__init__.py",
-        "_api/KiaUvoApiJP.py",
+        "_api/client.py",
     ):
         (component / name).write_text(f"# exact runtime bytes: {name}\n")
     (component / "translations/en.json").write_text('{"title": "Hyundai Bluelink JP"}')
@@ -53,20 +53,20 @@ def test_archive_can_install_without_source_checkout(
 ) -> None:
     output = tmp_path / "output"
     archive = build_release.build(repository, output, "0.2.0b2")
-    expected_api = repository / "custom_components/hyundai_jp/_api/KiaUvoApiJP.py"
+    expected_api = repository / "custom_components/hyundai_jp/_api/client.py"
     with ZipFile(archive) as zipped:
         assert set(zipped.namelist()) == {
             "__init__.py",
             "config_flow.py",
             "manifest.json",
             "_api/__init__.py",
-            "_api/KiaUvoApiJP.py",
+            "_api/client.py",
             "translations/en.json",
             "LICENSE",
             "LICENSE.api.txt",
             "ORIGINS.json",
         }
-        assert zipped.read("_api/KiaUvoApiJP.py") == expected_api.read_bytes()
+        assert zipped.read("_api/client.py") == expected_api.read_bytes()
         assert json.loads(zipped.read("manifest.json"))["version"] == "0.2.0b2"
         zipped.extractall(tmp_path / "ha/config/custom_components/hyundai_jp")
     assert (
@@ -112,7 +112,7 @@ def test_external_api_dependency_cannot_ship(repository: Path) -> None:
 
 
 def test_missing_api_cannot_ship(repository: Path) -> None:
-    (repository / "custom_components/hyundai_jp/_api/KiaUvoApiJP.py").unlink()
+    (repository / "custom_components/hyundai_jp/_api/client.py").unlink()
     with pytest.raises(ValueError, match="Missing bundled"):
         build_release.release_files(repository)
 

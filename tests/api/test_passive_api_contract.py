@@ -1,27 +1,24 @@
-"""Optional protocol surfaces remain passive across base interfaces."""
+"""Cached telemetry and protocol diagnostics remain local to the account."""
 
 from unittest.mock import Mock
 
-import pytest
-
-from custom_components.hyundai_jp._api.ApiImpl import ApiImpl
-from custom_components.hyundai_jp._api.ApiImplType1 import ApiImplType1
+from custom_components.hyundai_jp._api.client import HyundaiBluelinkApi
 from custom_components.hyundai_jp._api.Vehicle import Vehicle
 from custom_components.hyundai_jp._api.VehicleManager import VehicleManager
 
 
-@pytest.mark.parametrize("api", [ApiImpl(), ApiImplType1()])
-def test_base_interfaces_have_passive_defaults_without_network(api):
+def test_japan_diagnostics_and_cached_state_do_not_make_requests():
+    api = HyundaiBluelinkApi()
     api.session = Mock()
     before = Vehicle(id="synthetic")
-    assert api.supported_commands is None
-    assert api.get_local_diagnostics() == {}
+    assert "lock_action" in api.supported_commands
+    assert api.get_local_diagnostics()["mqtt_sessions"] == []
     assert api.apply_cached_mqtt_state(before) is False
     api.session.request.assert_not_called()
 
 
 def test_vehicle_manager_exposes_protocol_contract_without_authentication():
-    api = Mock(spec=ApiImpl)
+    api = Mock(spec=HyundaiBluelinkApi)
     api.supported_commands = frozenset({"lock_action"})
     api.get_local_diagnostics.return_value = {"state": "local"}
     api.apply_cached_mqtt_state.return_value = True

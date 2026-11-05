@@ -1,6 +1,6 @@
 """Tests for CCS2 protocol _update_vehicle_properties_ccs2 using JSON fixtures.
 
-Tests ApiImplType1._update_vehicle_properties_ccs2 with fixtures that use
+Tests JapanTelemetry._update_vehicle_properties_ccs2 with fixtures that use
 the newer CCS2 protocol structure (Drivetrain/Cabin/Green/Body/Chassis paths).
 TargetSoC in CCS2 is direct scalar values, not arrays.
 """
@@ -10,8 +10,8 @@ import json
 
 import pytest
 
-from custom_components.hyundai_jp._api.ApiImplType1 import ApiImplType1
 from custom_components.hyundai_jp._api.const import PressureUnit
+from custom_components.hyundai_jp._api.telemetry import JapanTelemetry
 from custom_components.hyundai_jp._api.Vehicle import Vehicle
 from tests.api.fixture_helpers import discover_fixtures, load_fixture
 
@@ -19,8 +19,8 @@ CCS2_FIXTURE_FILES = discover_fixtures("ccs2_ev9_")
 
 
 @pytest.fixture
-def ccs2_api() -> ApiImplType1:
-    api = ApiImplType1.__new__(ApiImplType1)
+def ccs2_api() -> JapanTelemetry:
+    api = JapanTelemetry()
     api.data_timezone = None
     api.temperature_range = [x * 0.5 for x in range(28, 60)]
     return api

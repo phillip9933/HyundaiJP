@@ -9,14 +9,14 @@ from homeassistant.const import EVENT_STATE_CHANGED
 from homeassistant.core import StateMachine
 
 from custom_components.hyundai_jp._api import Token, Vehicle
+from custom_components.hyundai_jp._api.client import HyundaiBluelinkApi
 from custom_components.hyundai_jp._api.japan_mqtt import JapanMqttSession
-from custom_components.hyundai_jp._api.KiaUvoApiJP import KiaUvoApiJP
 from custom_components.hyundai_jp.lock import HyundaiBluelinkLock
 from tests.ha.test_region_operation_serialization import coordinator
 
 
 async def test_delayed_unlock_survives_later_unrelated_packet_and_reaches_activity():
-    api = KiaUvoApiJP()
+    api = HyundaiBluelinkApi()
     api.session.request = Mock(
         side_effect=AssertionError("passive processing must not use HTTP")
     )

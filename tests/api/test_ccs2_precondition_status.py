@@ -33,7 +33,7 @@ None guard).
 
 import pytest
 
-from custom_components.hyundai_jp._api.ApiImplType1 import ApiImplType1
+from custom_components.hyundai_jp._api.telemetry import JapanTelemetry
 from custom_components.hyundai_jp._api.Vehicle import Vehicle
 
 # Minimal CCS2 state envelope shared by all cases. Drivetrain.FuelSystem.DTE is
@@ -93,8 +93,8 @@ _HEV_WINTER_MODE_ON = _state(
 
 
 @pytest.fixture
-def ccs2_api() -> ApiImplType1:
-    api = ApiImplType1.__new__(ApiImplType1)
+def ccs2_api() -> JapanTelemetry:
+    api = JapanTelemetry()
     api.data_timezone = None
     api.temperature_range = [x * 0.5 for x in range(28, 60)]
     return api

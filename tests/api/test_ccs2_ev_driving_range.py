@@ -14,8 +14,8 @@ EV-only range, so ev_driving_range stays None.
 
 import pytest
 
-from custom_components.hyundai_jp._api.ApiImplType1 import ApiImplType1
 from custom_components.hyundai_jp._api.const import ENGINE_TYPES
+from custom_components.hyundai_jp._api.telemetry import JapanTelemetry
 from custom_components.hyundai_jp._api.Vehicle import Vehicle
 from tests.api.fixture_helpers import load_fixture
 
@@ -23,8 +23,8 @@ SPORTAGE_PHEV_FIXTURE = "ccs2_sportage_phev_2027_ccs2.json"
 
 
 @pytest.fixture
-def ccs2_api() -> ApiImplType1:
-    api = ApiImplType1.__new__(ApiImplType1)
+def ccs2_api() -> JapanTelemetry:
+    api = JapanTelemetry()
     api.data_timezone = None
     api.temperature_range = [x * 0.5 for x in range(28, 60)]
     return api

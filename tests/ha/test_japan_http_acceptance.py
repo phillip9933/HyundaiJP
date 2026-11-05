@@ -9,13 +9,13 @@ import pytest
 import requests
 
 from custom_components.hyundai_jp._api import Token, Vehicle, VehicleManager
+from custom_components.hyundai_jp._api.client import HyundaiBluelinkApi
 from custom_components.hyundai_jp._api.const import ORDER_STATUS
-from custom_components.hyundai_jp._api.KiaUvoApiJP import KiaUvoApiJP
 from tests.ha.test_region_operation_serialization import coordinator
 
 
 def pipeline(body=None, failure=None):
-    api = KiaUvoApiJP()
+    api = HyundaiBluelinkApi()
     helper = Mock()
     helper.request_context = {
         "clientId": "synthetic-client",

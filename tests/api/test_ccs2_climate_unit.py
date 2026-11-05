@@ -5,14 +5,14 @@ Dropping the unit left consumers guessing (kia_uvo#1809): a Celsius car
 could be shown and driven as Fahrenheit.
 """
 
-from custom_components.hyundai_jp._api.ApiImplType1 import ApiImplType1
 from custom_components.hyundai_jp._api.const import TEMPERATURE_C
+from custom_components.hyundai_jp._api.telemetry import JapanTelemetry
 from custom_components.hyundai_jp._api.Vehicle import Vehicle
 from tests.api.fixture_helpers import load_fixture
 
 
-def _type1_api() -> ApiImplType1:
-    api = ApiImplType1.__new__(ApiImplType1)
+def _type1_api() -> JapanTelemetry:
+    api = JapanTelemetry()
     api.data_timezone = None
     api.temperature_range = [x * 0.5 for x in range(28, 60)]
     return api

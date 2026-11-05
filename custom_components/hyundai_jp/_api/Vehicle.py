@@ -218,7 +218,7 @@ class Vehicle:
     average_fuel_economy_after_refuel: float | None = None
     average_fuel_economy_unit: int | None = None
 
-    # Lamp status fields (KiaUvoApiEU and CA)
+    # Lamp status fields in the CCS2 telemetry format
     headlamp_status: int | None = None
     headlamp_left_low: bool | None = None
     headlamp_right_low: bool | None = None

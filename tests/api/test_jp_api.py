@@ -9,6 +9,7 @@ from unittest.mock import Mock, PropertyMock
 import pytest
 import requests
 
+from custom_components.hyundai_jp._api.client import HyundaiBluelinkApi
 from custom_components.hyundai_jp._api.const import ORDER_STATUS
 from custom_components.hyundai_jp._api.exceptions import (
     APIError,
@@ -21,7 +22,6 @@ from custom_components.hyundai_jp._api.exceptions import (
     RequestTimeoutError,
     ServiceTemporaryUnavailable,
 )
-from custom_components.hyundai_jp._api.KiaUvoApiJP import KiaUvoApiJP
 from custom_components.hyundai_jp._api.Token import Token
 from custom_components.hyundai_jp._api.Vehicle import Vehicle, VehicleSupports
 from custom_components.hyundai_jp._api.VehicleManager import VehicleManager
@@ -39,13 +39,13 @@ def response(payload, status=200):
 
 @pytest.fixture
 def api():
-    result = KiaUvoApiJP()
+    result = HyundaiBluelinkApi()
     result.session = Mock()
     return result
 
 
 def test_japan_capabilities():
-    api = KiaUvoApiJP()
+    api = HyundaiBluelinkApi()
     assert "schedule_charging_and_climate" in api.supported_commands
 
 
@@ -626,7 +626,7 @@ def test_profile_camera_capability_survives_vehicle_manager_initialization(
 
     monkeypatch.setattr(
         import_module("custom_components.hyundai_jp._api.VehicleManager"),
-        "KiaUvoApiJP",
+        "HyundaiBluelinkApi",
         lambda: api,
     )
     manager = VehicleManager("synthetic", "synthetic", "1234", geocode_api_enable=False)
@@ -737,7 +737,7 @@ def test_force_refresh_requires_correlated_completion_and_newer_state(api, monke
     monkeypatch.setattr(api, "_mqtt_for_vehicle", lambda *args: helper)
     monkeypatch.setattr(
         api,
-        "_control_headers",
+        "_get_control_headers",
         lambda token, vehicle=None: {"Authorization": "synthetic"},
     )
     api.session.request.return_value = response({"msgId": "synthetic-action"})
@@ -772,7 +772,7 @@ def test_force_refresh_ack_does_not_mean_success(api, monkeypatch, status, error
     monkeypatch.setattr(api, "_mqtt_for_vehicle", lambda *args: helper)
     monkeypatch.setattr(
         api,
-        "_control_headers",
+        "_get_control_headers",
         lambda token, vehicle=None: {"Authorization": "synthetic"},
     )
     api.session.request.return_value = response({"msgId": "synthetic-action"})
@@ -791,7 +791,7 @@ def test_confirmed_refresh_without_new_telemetry_times_out(api, monkeypatch):
     monkeypatch.setattr(api, "_mqtt_for_vehicle", lambda *args: helper)
     monkeypatch.setattr(
         api,
-        "_control_headers",
+        "_get_control_headers",
         lambda token, vehicle=None: {"Authorization": "synthetic"},
     )
     monkeypatch.setattr(api, "update_vehicle_with_cached_state", lambda *args: None)
@@ -812,7 +812,7 @@ def test_force_ignores_retained_state_and_uses_newer_cached_status(api, monkeypa
     monkeypatch.setattr(api, "_mqtt_for_vehicle", lambda *args: helper)
     monkeypatch.setattr(
         api,
-        "_control_headers",
+        "_get_control_headers",
         lambda token, vehicle=None: {"Authorization": "synthetic"},
     )
 
@@ -847,7 +847,7 @@ def test_force_completion_before_vss_waits_for_newer_message(api, monkeypatch):
     monkeypatch.setattr(api, "_mqtt_for_vehicle", lambda *args: helper)
     monkeypatch.setattr(
         api,
-        "_control_headers",
+        "_get_control_headers",
         lambda token, vehicle=None: {"Authorization": "synthetic"},
     )
     monkeypatch.setattr(api, "update_vehicle_with_cached_state", lambda *args: None)
@@ -1266,7 +1266,7 @@ def test_disconnected_persistent_telemetry_session_is_replaced_before_next_comma
     replacement = Mock()
     factory = Mock(return_value=replacement)
     monkeypatch.setattr(
-        "custom_components.hyundai_jp._api.KiaUvoApiJP.JapanMqttSession", factory
+        "custom_components.hyundai_jp._api.client.JapanMqttSession", factory
     )
     assert api._mqtt_for_vehicle(token, vehicle) is replacement
     failed.close.assert_called_once()
@@ -1310,7 +1310,7 @@ def test_authentication_rotation_retires_all_older_vehicle_helpers(api, monkeypa
     replacement = Mock(closed=False, failed=False)
     factory = Mock(return_value=replacement)
     monkeypatch.setattr(
-        "custom_components.hyundai_jp._api.KiaUvoApiJP.JapanMqttSession", factory
+        "custom_components.hyundai_jp._api.client.JapanMqttSession", factory
     )
     # A disconnect observer can enter the new provider from another thread.
     with ThreadPoolExecutor(max_workers=1) as workers:
@@ -1338,7 +1338,7 @@ def test_failed_replacement_still_releases_retired_authentication(api, monkeypat
     previous = Mock()
     api._mqtt_sessions = {"one": (("old", "phone", "registration"), previous)}
     monkeypatch.setattr(
-        "custom_components.hyundai_jp._api.KiaUvoApiJP.JapanMqttSession",
+        "custom_components.hyundai_jp._api.client.JapanMqttSession",
         Mock(side_effect=ValueError("synthetic construction failure")),
     )
     with pytest.raises(ValueError, match="synthetic construction"):
@@ -1363,7 +1363,7 @@ def test_api_close_releases_lock_before_callbacks_and_prevents_resurrection(
     api._mqtt_sessions = {"one": (("access", "phone", "registration"), helper)}
     factory = Mock()
     monkeypatch.setattr(
-        "custom_components.hyundai_jp._api.KiaUvoApiJP.JapanMqttSession", factory
+        "custom_components.hyundai_jp._api.client.JapanMqttSession", factory
     )
 
     def reconnect():
@@ -1409,7 +1409,7 @@ def test_force_refresh_accepts_newer_fractional_observation_in_same_second(
             return now.astimezone(tz)
 
     monkeypatch.setattr(
-        "custom_components.hyundai_jp._api.KiaUvoApiJP.dt",
+        "custom_components.hyundai_jp._api.client.dt",
         SimpleNamespace(datetime=FrozenDateTime, UTC=dt.UTC),
     )
     helper = refresh_helper()
@@ -1420,7 +1420,7 @@ def test_force_refresh_accepts_newer_fractional_observation_in_same_second(
     }
     monkeypatch.setattr(api, "_mqtt_for_vehicle", lambda *args: helper)
     monkeypatch.setattr(
-        api, "_control_headers", lambda *args: {"Authorization": "synthetic"}
+        api, "_get_control_headers", lambda *args: {"Authorization": "synthetic"}
     )
     monkeypatch.setattr(
         api,
@@ -1445,7 +1445,7 @@ def test_refresh_authentication_diagnostics_do_not_copy_exception_text(
 ):
     secret = "SYNTHETIC_PRIVATE_AUTH_EXCEPTION"
     monkeypatch.setattr(
-        api, "_control_headers", Mock(side_effect=AuthenticationError(secret))
+        api, "_get_control_headers", Mock(side_effect=AuthenticationError(secret))
     )
     with pytest.raises(AuthenticationError):
         api.force_refresh_vehicle_state(

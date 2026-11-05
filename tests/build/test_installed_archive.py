@@ -64,7 +64,7 @@ for source in sorted(component.rglob("*.py")):
     assert Path(imported.__file__).resolve().is_relative_to(component)
     modules.append(name)
 assert "custom_components.hyundai_jp.config_flow" in modules
-assert "custom_components.hyundai_jp._api.KiaUvoApiJP" in modules
+assert "custom_components.hyundai_jp._api.client" in modules
 assert "custom_components.hyundai_jp.lock" in modules
 assert not any(name.startswith("hyundai_kia_connect_api") for name in sys.modules)
 print(f"Imported {len(modules)} bundled modules from extracted release")

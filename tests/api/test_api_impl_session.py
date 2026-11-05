@@ -1,19 +1,19 @@
-"""Tests for ApiImplSession — timeout and connection pooling."""
+"""Tests for BluelinkSession — timeout and connection pooling."""
 
 from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
 
-from custom_components.hyundai_jp._api.ApiImpl import ApiImplSession
 from custom_components.hyundai_jp._api.exceptions import RequestTimeoutError
+from custom_components.hyundai_jp._api.http import BluelinkSession
 
 
-class TestApiImplSessionTimeout:
+class TestBluelinkSessionTimeout:
     """Session applies default timeout to all requests."""
 
     def test_default_timeout_applied(self):
-        session = ApiImplSession()
+        session = BluelinkSession()
         with patch.object(
             requests.Session, "request", return_value=MagicMock()
         ) as mock:
@@ -23,7 +23,7 @@ class TestApiImplSessionTimeout:
             assert call_kwargs["timeout"] == (10, 30)
 
     def test_custom_timeout_not_overridden(self):
-        session = ApiImplSession()
+        session = BluelinkSession()
         with patch.object(
             requests.Session, "request", return_value=MagicMock()
         ) as mock:
@@ -33,7 +33,7 @@ class TestApiImplSessionTimeout:
             assert call_kwargs["timeout"] == (5, 15)
 
     def test_region_override_timeout(self):
-        session = ApiImplSession()
+        session = BluelinkSession()
         session.HTTP_READ_TIMEOUT = 45
         with patch.object(
             requests.Session, "request", return_value=MagicMock()
@@ -44,7 +44,7 @@ class TestApiImplSessionTimeout:
             assert call_kwargs["timeout"] == (10, 45)
 
     def test_post_timeout(self):
-        session = ApiImplSession()
+        session = BluelinkSession()
         with patch.object(
             requests.Session, "request", return_value=MagicMock()
         ) as mock:
@@ -54,11 +54,11 @@ class TestApiImplSessionTimeout:
             assert call_kwargs["timeout"] == (10, 30)
 
 
-class TestApiImplSessionTimeoutException:
+class TestBluelinkSessionTimeoutException:
     """Timeout raises RequestTimeoutError."""
 
     def test_timeout_raises_request_timeout_error(self):
-        session = ApiImplSession()
+        session = BluelinkSession()
         with (
             patch.object(
                 requests.Session,
@@ -70,7 +70,7 @@ class TestApiImplSessionTimeoutException:
             session.get("https://example.com")
 
     def test_connect_timeout_raises_request_timeout_error(self):
-        session = ApiImplSession()
+        session = BluelinkSession()
         with (
             patch.object(
                 requests.Session,
@@ -82,7 +82,7 @@ class TestApiImplSessionTimeoutException:
             session.get("https://example.com")
 
     def test_read_timeout_raises_request_timeout_error(self):
-        session = ApiImplSession()
+        session = BluelinkSession()
         with (
             patch.object(
                 requests.Session,
@@ -94,7 +94,7 @@ class TestApiImplSessionTimeoutException:
             session.get("https://example.com")
 
     def test_other_exceptions_passthrough(self):
-        session = ApiImplSession()
+        session = BluelinkSession()
         with (
             patch.object(
                 requests.Session,
@@ -107,7 +107,7 @@ class TestApiImplSessionTimeoutException:
 
 
 def test_bytes_http_method_is_normalized_without_changing_timeout():
-    session = ApiImplSession()
+    session = BluelinkSession()
     with patch.object(requests.Session, "request", return_value=MagicMock()) as request:
         session.request(b"GET", "https://synthetic.invalid")
     request.assert_called_once_with(

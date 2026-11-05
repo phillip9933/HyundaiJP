@@ -1,14 +1,13 @@
 import datetime as dt
 from importlib import import_module
 
-from custom_components.hyundai_jp._api.ApiImpl import ApiImpl
+from custom_components.hyundai_jp._api.client import HyundaiBluelinkApi
 from custom_components.hyundai_jp._api.Token import Token
 from custom_components.hyundai_jp._api.VehicleManager import VehicleManager
 
 
-class DummyApi(ApiImpl):
+class DummyApi:
     def __init__(self):
-        super().__init__()
         self.login_calls = 0
 
     def login(self, username, password, pin=None):
@@ -22,12 +21,15 @@ class DummyApi(ApiImpl):
     def get_vehicles(self, token):
         return []
 
+    def refresh_access_token(self, token):
+        return self.login(token.username, token.password, token.pin)
+
 
 def test_check_and_refresh_token_handles_min_datetime(monkeypatch):
     dummy_api = DummyApi()
     monkeypatch.setattr(
         import_module("custom_components.hyundai_jp._api.VehicleManager"),
-        "KiaUvoApiJP",
+        "HyundaiBluelinkApi",
         lambda: dummy_api,
     )
     manager = VehicleManager(
@@ -48,7 +50,7 @@ def test_login_returns_false_without_token(monkeypatch):
     monkeypatch.setattr(dummy_api, "login", lambda **kwargs: None)
     monkeypatch.setattr(
         import_module("custom_components.hyundai_jp._api.VehicleManager"),
-        "KiaUvoApiJP",
+        "HyundaiBluelinkApi",
         lambda: dummy_api,
     )
     manager = VehicleManager(username="user", password="pass", pin="1234")
@@ -62,10 +64,10 @@ def test_commands_before_login_are_rejected_without_request(monkeypatch):
 
     from custom_components.hyundai_jp._api.exceptions import AuthenticationError
 
-    dummy_api = Mock(spec=ApiImpl)
+    dummy_api = Mock(spec=HyundaiBluelinkApi)
     monkeypatch.setattr(
         import_module("custom_components.hyundai_jp._api.VehicleManager"),
-        "KiaUvoApiJP",
+        "HyundaiBluelinkApi",
         lambda: dummy_api,
     )
     manager = VehicleManager("synthetic", "synthetic", "0000")

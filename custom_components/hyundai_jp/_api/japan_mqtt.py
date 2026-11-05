@@ -20,7 +20,6 @@ from typing import Any, Literal, cast, overload
 import paho.mqtt.client as mqtt
 import requests
 
-from .ApiImpl import ApiImplSession
 from .const import ORDER_STATUS
 from .exceptions import (
     APIError,
@@ -30,6 +29,7 @@ from .exceptions import (
     RequestTimeoutError,
     ServiceTemporaryUnavailable,
 )
+from .http import BluelinkSession
 from .mqtt_client import MqttTransport
 from .mqtt_service_hub import ServiceHubProviderMixin, build_car_status_topics
 from .Token import Token
@@ -191,7 +191,7 @@ class JapanMqttSession(ServiceHubProviderMixin):
         self._registered_client_id: str | None = None
         self._registration_uuid = registration_uuid
         self._headers_factory = headers_factory
-        self._http_session = ApiImplSession()
+        self._http_session = BluelinkSession()
         self._transport: MqttTransport | None = None
         self._transport_pool = transport_pool or JapanMqttTransportPool()
         self._connection: _JapanConnection | None = None

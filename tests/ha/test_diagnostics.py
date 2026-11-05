@@ -201,9 +201,9 @@ async def test_bundled_version_requires_no_installed_api_package(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_local_protocol_diagnostics_are_passive_and_off_event_loop() -> None:
-    from custom_components.hyundai_jp._api.KiaUvoApiJP import KiaUvoApiJP
+    from custom_components.hyundai_jp._api.client import HyundaiBluelinkApi
 
-    api = KiaUvoApiJP()
+    api = HyundaiBluelinkApi()
     api.session = MagicMock()
     api._japan_svm_cache = {"SYNTHETIC_PRIVATE_VEHICLE": object()}
     helper = SimpleNamespace(

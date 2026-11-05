@@ -13,14 +13,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from custom_components.hyundai_jp._api.ApiImpl import (
-    ClimateRequestOptions,
-    POICoord,
-    POIInfo,
-    ScheduleChargingClimateRequestOptions,
-    WindowRequestOptions,
-)
-from custom_components.hyundai_jp._api.ApiImplType1 import ApiImplType1
+from custom_components.hyundai_jp._api.client import HyundaiBluelinkApi
 from custom_components.hyundai_jp._api.const import (
     CHARGE_PORT_ACTION,
     ORDER_STATUS,
@@ -34,13 +27,20 @@ from custom_components.hyundai_jp._api.exceptions import (
     RequestTimeoutError,
     UnsupportedControlError,
 )
-from custom_components.hyundai_jp._api.japan_commands import JapanCommandsMixin
 from custom_components.hyundai_jp._api.japan_mqtt import JapanMqttSession
+from custom_components.hyundai_jp._api.options import (
+    ClimateRequestOptions,
+    POICoord,
+    POIInfo,
+    ScheduleChargingClimateRequestOptions,
+    WindowRequestOptions,
+)
 from custom_components.hyundai_jp._api.Vehicle import VehicleSupports
 
 
-class Adapter(JapanCommandsMixin, ApiImplType1):
+class Adapter(HyundaiBluelinkApi):
     def __init__(self):
+        super().__init__()
         self._request = Mock(
             side_effect=[
                 {"controlToken": "synthetic-control", "expiresTime": 60},
@@ -891,7 +891,7 @@ def test_shared_header_orchestration_retains_japan_cached_grant_policy(monkeypat
     )
     token.control_token = "Bearer cached-control"
     token.control_token_expiry = 200.25
-    assert api._control_headers(token, vehicle) == {
+    assert api._get_control_headers(token, vehicle) == {
         "Authorization": "Bearer cached-control",
         "ccuCCS2ProtocolSupport": "1",
     }
@@ -908,7 +908,10 @@ def test_shared_grant_cache_keeps_japan_fractional_ttl(monkeypatch):
         "custom_components.hyundai_jp._api.japan_commands.time.time", lambda: 100.25
     )
     api._request.side_effect = [{"controlToken": "new-control", "expiresTime": 0.5}]
-    assert api._control_headers(token, vehicle)["Authorization"] == "Bearer new-control"
+    assert (
+        api._get_control_headers(token, vehicle)["Authorization"]
+        == "Bearer new-control"
+    )
     assert token.control_token_expiry == 100.75
     assert api._get_control_grant(token) == ("Bearer new-control", 100.75)
     assert api._request.call_count == 1

@@ -5,12 +5,12 @@ from unittest.mock import Mock
 import pytest
 import requests
 
-from custom_components.hyundai_jp._api.KiaUvoApiJP import KiaUvoApiJP
+from custom_components.hyundai_jp._api.client import HyundaiBluelinkApi
 
 
 @pytest.mark.parametrize("failed_stage", ["first", "second", "http"])
 def test_close_attempts_all_helpers_and_http_after_an_earlier_failure(failed_stage):
-    api = KiaUvoApiJP()
+    api = HyundaiBluelinkApi()
     events = []
     error = RuntimeError("PRIVATE_CLEANUP_DETAILS")
 
@@ -40,13 +40,13 @@ def test_close_attempts_all_helpers_and_http_after_an_earlier_failure(failed_sta
 def test_close_only_uses_existing_resources_and_repeated_close_releases_no_helpers(
     monkeypatch,
 ):
-    api = KiaUvoApiJP()
+    api = HyundaiBluelinkApi()
     api.session = Mock(spec=requests.Session)
     helper = Mock(close=Mock())
     api._mqtt_sessions = {"synthetic": ((), helper)}
     factory = Mock(side_effect=AssertionError("cleanup cannot create a session"))
     monkeypatch.setattr(
-        "custom_components.hyundai_jp._api.KiaUvoApiJP.JapanMqttSession", factory
+        "custom_components.hyundai_jp._api.client.JapanMqttSession", factory
     )
     api.close()
     api.close()

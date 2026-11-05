@@ -12,7 +12,7 @@ import time
 from typing import TYPE_CHECKING, Any
 import uuid
 
-from .ApiImpl import (
+from .options import (
     ClimateRequestOptions,
     POIInfo,
     ScheduleChargingClimateRequestOptions,
@@ -24,7 +24,13 @@ from .Vehicle import Vehicle
 if TYPE_CHECKING:
     from .japan_mqtt import JapanMqttSession
 
-from .const import CHARGE_PORT_ACTION, ORDER_STATUS, VALET_MODE_ACTION, WINDOW_STATE
+from .const import (
+    CHARGE_PORT_ACTION,
+    ORDER_STATUS,
+    VALET_MODE_ACTION,
+    VEHICLE_LOCK_ACTION,
+    WINDOW_STATE,
+)
 from .exceptions import (
     AuthenticationError,
     InvalidAPIResponseError,
@@ -49,12 +55,6 @@ class JapanCommandsMixin:
 
     if TYPE_CHECKING:
 
-        def _get_control_headers(
-            self, token: Token, vehicle: Vehicle | None = None
-        ) -> dict[str, Any]: ...
-        def _get_control_grant(
-            self, token: Token, vehicle: Vehicle | None = None
-        ) -> tuple[str, float]: ...
         def _request(
             self, method: str, path: str, *, json_response: bool = True, **kwargs: Any
         ) -> Any: ...
@@ -155,19 +155,6 @@ class JapanCommandsMixin:
             raise InvalidAPIResponseError("Japan control token is incomplete")
         return "Bearer " + control, time.time() + expires
 
-    def _control_token_for_vehicle(
-        self, token: Token, vehicle: Vehicle | None
-    ) -> tuple[str, float]:
-        return self._get_control_grant(token, vehicle)
-
-    def _control_token_headers(self, control_token: str) -> dict[str, str]:
-        return {"Authorization": control_token}
-
-    def _control_headers(
-        self, token: Token, vehicle: Vehicle | None = None
-    ) -> dict[str, Any]:
-        return self._get_control_headers(token, vehicle)
-
     def _remember_japan_action(
         self,
         action_id: str,
@@ -177,8 +164,6 @@ class JapanCommandsMixin:
         status: ORDER_STATUS | None = None,
     ) -> None:
         """Keep bounded local receipts; the adapter owns telemetry sessions."""
-        if not hasattr(self, "_japan_actions"):
-            self._japan_actions = {}
         if action_id not in self._japan_actions and len(self._japan_actions) >= 128:
             self._japan_actions.pop(next(iter(self._japan_actions)))
         if status is None and children is None:
@@ -195,7 +180,7 @@ class JapanCommandsMixin:
             category = "invalid_response"
         elif isinstance(error, ValueError):
             category = "invalid_input"
-        diagnostic = getattr(self, "_japan_command_diagnostics", {})
+        diagnostic = self._japan_command_diagnostics
         diagnostic["failed_stage"] = diagnostic.get("stage", "unknown")
         diagnostic["stage"] = (
             "submission_unknown"
@@ -271,7 +256,7 @@ class JapanCommandsMixin:
         try:
             vehicle_id = self._command_vehicle_id(vehicle)
             # Validate PIN before connecting MQTT or performing any command request.
-            headers = self._control_headers(token, vehicle)
+            headers = self._get_control_headers(token, vehicle)
             self._japan_command_diagnostics["stage"] = "mqtt_setup"
             helper = self._mqtt_for_vehicle(token, vehicle)
         except Exception as error:
@@ -281,7 +266,7 @@ class JapanCommandsMixin:
             helper.prepare()
             # MQTT bootstrap may outlast a nearly expired cached PIN grant.
             # Recheck it immediately before the control request is submitted.
-            authorization = self._control_headers(token, vehicle)["Authorization"]
+            authorization = self._get_control_headers(token, vehicle)["Authorization"]
             headers = self._vehicle_headers(token, vehicle, helper)
             headers["Authorization"] = authorization
             self._japan_command_diagnostics["stage"] = "http_submitting"
@@ -324,11 +309,7 @@ class JapanCommandsMixin:
     ) -> ORDER_STATUS:
         """Return a local service receipt, never fabricate vehicle execution."""
         vehicle_id = self._command_vehicle_id(vehicle)
-        tracked = (
-            self._japan_actions.get(action_id)
-            if hasattr(self, "_japan_actions")
-            else None
-        )
+        tracked = self._japan_actions.get(action_id)
         if tracked is None or tracked[0] != vehicle_id:
             return ORDER_STATUS.UNKNOWN
         children, status = tracked[1:]
@@ -572,7 +553,7 @@ class JapanCommandsMixin:
         ):
             raise ValueError("No Japan schedule changes requested")
         vehicle_id = self._command_vehicle_id(vehicle)
-        headers = self._control_headers(token, vehicle)
+        headers = self._get_control_headers(token, vehicle)
         current = self._payload(
             self._request(
                 "GET",
@@ -949,10 +930,10 @@ class JapanCommandsMixin:
             for value in (ac, dc)
         ):
             raise ValueError("Japan charge targets must be 50–100 in steps of ten")
-        cached = getattr(self, "_charge_target_cache", {}).get(vehicle_id)
+        cached = self._charge_target_cache.get(vehicle_id)
         if cached is None:
             self.update_vehicle_with_charge_targets(token, vehicle)
-            cached = getattr(self, "_charge_target_cache", {}).get(vehicle_id)
+            cached = self._charge_target_cache.get(vehicle_id)
         targets = cached[1] if cached is not None else {}
         ac_types = [kind for kind in (1, 2) if kind in targets]
         if 0 not in targets or len(ac_types) != 1:
@@ -970,7 +951,57 @@ class JapanCommandsMixin:
                 ]
             },
         )
-        getattr(self, "_charge_target_cache", {}).pop(vehicle_id, None)
+        self._charge_target_cache.pop(vehicle_id, None)
         action_id = str(uuid.uuid4())
         self._remember_japan_action(action_id, vehicle_id)
         return action_id
+
+    def start_charge(self, token: Token, vehicle: Vehicle) -> str:
+        return self._send_vehicle_command(
+            token, vehicle, "control/charge", {"command": "start"}, ccs2=True
+        )
+
+    def stop_charge(self, token: Token, vehicle: Vehicle) -> str:
+        return self._send_vehicle_command(
+            token, vehicle, "control/charge", {"command": "stop"}, ccs2=True
+        )
+
+    def lock_action(
+        self, token: Token, vehicle: Vehicle, action: VEHICLE_LOCK_ACTION
+    ) -> str:
+        return self._send_vehicle_command(
+            token, vehicle, "control/door", {"command": action.value}, ccs2=True
+        )
+
+    def stop_climate(self, token: Token, vehicle: Vehicle) -> str:
+        return self._send_vehicle_command(
+            token, vehicle, "control/temperature", {"command": "stop"}, ccs2=True
+        )
+
+    def start_hazard_lights(self, token: Token, vehicle: Vehicle) -> str:
+        return self._send_vehicle_command(
+            token, vehicle, "control/light", {"command": "on"}, ccs2=True
+        )
+
+    def _get_control_grant(
+        self, token: Token, vehicle: Vehicle | None = None
+    ) -> tuple[str, float]:
+        """Validate, reuse or renew a grant, then cache the normalized result."""
+        self._validate_control_token_request(token)
+        if self._control_token_is_valid(token):
+            assert token.control_token is not None
+            return token.control_token, token.control_token_expiry
+        control_token, expiry = self._normalize_control_token_response(
+            self._request_control_token(token, vehicle)
+        )
+        token.control_token = control_token
+        token.control_token_expiry = expiry
+        return control_token, expiry
+
+    def _get_control_headers(
+        self, token: Token, vehicle: Vehicle | None = None
+    ) -> dict[str, Any]:
+        control_token, _ = self._get_control_grant(token, vehicle)
+        return self._control_authenticated_headers(token, vehicle) | {
+            "Authorization": control_token
+        }

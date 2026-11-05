@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from custom_components.hyundai_jp._api import Vehicle
-from custom_components.hyundai_jp._api.ApiImpl import WindowRequestOptions
 from custom_components.hyundai_jp._api.const import WINDOW_STATE
+from custom_components.hyundai_jp._api.options import WindowRequestOptions
 from custom_components.hyundai_jp.cover import COVER_DESCRIPTIONS, HyundaiBluelinkCover
 
 

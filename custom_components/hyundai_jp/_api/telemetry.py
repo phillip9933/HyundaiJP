@@ -1,12 +1,10 @@
-"""Status parsers and command helpers used by the Japan adapter."""
+"""Japan legacy and CCS2 telemetry parsing without network or session state."""
 
-import base64
 from collections.abc import Sequence
 import datetime as dt
 import logging
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
-from .ApiImpl import ApiImpl, ApiImplSession
 from .const import (
     CONNECTOR_FASTENING_STATE,
     DISTANCE_UNITS,
@@ -15,10 +13,8 @@ from .const import (
     PRESSURE_SCALES,
     SEAT_STATUS,
     TEMPERATURE_UNITS,
-    VEHICLE_LOCK_ACTION,
     PressureUnit,
 )
-from .Token import Token
 from .utils import (
     bool_or_none,
     ccs2_reservation_time_or_none,
@@ -36,17 +32,14 @@ from .Vehicle import Vehicle
 _LOGGER = logging.getLogger(__name__)
 
 
-class ApiImplType1(ApiImpl):
-    """Japan parser, command payload and PIN grant helpers."""
+class JapanTelemetry:
+    """Map Japan status documents to vehicle fields without performing I/O."""
 
-    # Set by the Japan adapter.
-    APP_ID: str
-    CFB: bytes
-    temperature_range: Sequence[float]
-
-    def __init__(self) -> None:
-        """Initialize."""
-        self.session = ApiImplSession()
+    def __init__(
+        self, data_timezone: dt.tzinfo = dt.UTC, temperature_range: Sequence[float] = ()
+    ) -> None:
+        self.data_timezone = data_timezone
+        self.temperature_range = temperature_range
 
     def _get_time_from_string(self, value: Any, timesection: Any) -> dt.time | None:
         if value is None:
@@ -71,26 +64,6 @@ class ApiImplType1(ApiImpl):
                 e,
             )
             return None
-
-    if TYPE_CHECKING:
-
-        def _control_token_for_vehicle(
-            self, token: Token, vehicle: Vehicle | None
-        ) -> tuple[str, float]: ...
-
-        def _control_authenticated_headers(
-            self, token: Token, vehicle: Vehicle | None
-        ) -> dict[str, Any]: ...
-
-        def _control_token_headers(self, control_token: str) -> dict[str, str]: ...
-
-    def _get_control_headers(
-        self, token: Token, vehicle: Vehicle | None = None
-    ) -> dict[str, Any]:
-        control_token, _ = self._control_token_for_vehicle(token, vehicle)
-        return self._control_authenticated_headers(
-            token, vehicle
-        ) | self._control_token_headers(control_token)
 
     def _update_vehicle_properties(
         self, vehicle: Vehicle, state: dict[str, Any]
@@ -1142,77 +1115,3 @@ class ApiImplType1(ApiImpl):
             )
 
         vehicle.data = state
-
-    def _send_vehicle_command(
-        self,
-        token: Token,
-        vehicle: Vehicle,
-        endpoint: str,
-        payload: dict[str, Any],
-        *,
-        ccs2: bool,
-    ) -> str:
-        raise NotImplementedError("Japan adapter must implement this hook")
-
-    def start_charge(self, token: Token, vehicle: Vehicle) -> str:
-        return self._send_vehicle_command(
-            token, vehicle, "control/charge", {"command": "start"}, ccs2=True
-        )
-
-    def stop_charge(self, token: Token, vehicle: Vehicle) -> str:
-        return self._send_vehicle_command(
-            token, vehicle, "control/charge", {"command": "stop"}, ccs2=True
-        )
-
-    def lock_action(
-        self, token: Token, vehicle: Vehicle, action: VEHICLE_LOCK_ACTION
-    ) -> str:
-        return self._send_vehicle_command(
-            token, vehicle, "control/door", {"command": action.value}, ccs2=True
-        )
-
-    def stop_climate(self, token: Token, vehicle: Vehicle) -> str:
-        return self._send_vehicle_command(
-            token, vehicle, "control/temperature", {"command": "stop"}, ccs2=True
-        )
-
-    def start_hazard_lights(self, token: Token, vehicle: Vehicle) -> str:
-        return self._send_vehicle_command(
-            token, vehicle, "control/light", {"command": "on"}, ccs2=True
-        )
-
-    def _validate_control_token_request(self, token: Token) -> None:
-        raise NotImplementedError("Japan adapter must implement this hook")
-
-    def _control_token_is_valid(self, token: Token) -> bool:
-        raise NotImplementedError("Japan adapter must implement this hook")
-
-    def _request_control_token(
-        self, token: Token, vehicle: Vehicle | None
-    ) -> dict[str, Any]:
-        raise NotImplementedError("Japan adapter must implement this hook")
-
-    def _normalize_control_token_response(
-        self, response: dict[str, Any]
-    ) -> tuple[str, float]:
-        raise NotImplementedError("Japan adapter must implement this hook")
-
-    def _get_control_grant(
-        self, token: Token, vehicle: Vehicle | None = None
-    ) -> tuple[str, float]:
-        """Validate, reuse or renew a grant, then cache the normalized result."""
-        self._validate_control_token_request(token)
-        if self._control_token_is_valid(token):
-            assert token.control_token is not None
-            return token.control_token, token.control_token_expiry
-        control_token, expiry = self._normalize_control_token_response(
-            self._request_control_token(token, vehicle)
-        )
-        token.control_token = control_token
-        token.control_token_expiry = expiry
-        return control_token, expiry
-
-    def _stamp_for_epoch(self, epoch: int) -> str:
-        raw_data = f"{self.APP_ID}:{epoch}".encode()
-        result = bytes(b1 ^ b2 for b1, b2 in zip(self.CFB, raw_data))
-        return base64.b64encode(result).decode("utf-8")

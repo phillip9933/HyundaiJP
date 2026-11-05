@@ -305,9 +305,7 @@ def test_missing_metadata_cannot_reuse_a_previous_registration_identity(broker):
 def test_concurrent_command_and_refresh_lookup_cannot_orphan_a_helper(
     broker, monkeypatch
 ):
-    api_module = importlib.import_module(
-        "custom_components.hyundai_jp._api.KiaUvoApiJP"
-    )
+    api_module = importlib.import_module("custom_components.hyundai_jp._api.client")
     fleet = VehicleManager(username="synthetic", password="synthetic", pin="synthetic")
     fleet.token = Token(
         username="synthetic",

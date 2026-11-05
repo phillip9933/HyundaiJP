@@ -33,7 +33,9 @@ if TYPE_CHECKING:
 
 # Tool-agnostic: not every consumer installs with pip (uv, poetry, conda, or
 # Home Assistant's manifest-driven installer); pip is only an example.
-IMAGE_EXTRA_HINT = "install the HyundaiJP image requirements (Pillow and numpy)"
+IMAGE_EXTRA_HINT = (
+    "install the Hyundai Bluelink JP image requirements (Pillow and numpy)"
+)
 
 
 @dataclass(frozen=True)

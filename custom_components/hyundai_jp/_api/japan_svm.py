@@ -95,7 +95,7 @@ class JapanSVM:
     if TYPE_CHECKING:
         data_timezone: dt.tzinfo
 
-        def _control_headers(
+        def _get_control_headers(
             self, token: Token, vehicle: Vehicle | None = None
         ) -> dict[str, str]: ...
 
@@ -121,15 +121,15 @@ class JapanSVM:
     @property
     def svm_diagnostics(self) -> dict[str, Any]:
         """Describe only the latest local capture workflow, without private data."""
-        summary = dict(getattr(self, "_japan_svm_diagnostics", {"stage": "idle"}))
-        started = getattr(self, "_japan_svm_started", None)
+        summary = dict(self._japan_svm_diagnostics)
+        started = self._japan_svm_started
         if started is not None:
             summary["elapsed_seconds"] = round(max(0, time.perf_counter() - started), 1)
         return summary
 
     def get_svm_details(self, token: Token, vehicle: Vehicle) -> SVMDetails:
         """Return this session's last completed capture without waking the car."""
-        cache: dict[str, SVMDetails] = getattr(self, "_japan_svm_cache", {})
+        cache: dict[str, SVMDetails] = self._japan_svm_cache
         details = cache.get(vehicle.id)
         if details is None:
             raise NoDataFound("Japan camera requires a new manual capture")
@@ -196,7 +196,7 @@ class JapanSVM:
         # The app's camera flow validates its PIN grant before requesting an
         # image, but SVMApi deliberately uses the ordinary OAuth authorization.
         self._japan_svm_diagnostics["stage"] = "pin"
-        self._control_headers(token, vehicle)
+        self._get_control_headers(token, vehicle)
         path = f"/api/v1/spa/vehicles/{vehicle.id}/svm/async"
         self._japan_svm_diagnostics["stage"] = "submission"
         result = self._request(
@@ -230,8 +230,6 @@ class JapanSVM:
                     "dimensions_present": details.image_size is not None,
                 }
             )
-            if not hasattr(self, "_japan_svm_cache"):
-                self._japan_svm_cache = {}
             self._japan_svm_cache[vehicle.id] = details
             return details
         raise RequestTimeoutError("Japan camera capture timed out")

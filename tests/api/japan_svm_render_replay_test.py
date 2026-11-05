@@ -7,8 +7,8 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from custom_components.hyundai_jp._api.client import HyundaiBluelinkApi
 from custom_components.hyundai_jp._api.exceptions import NoDataFound
-from custom_components.hyundai_jp._api.japan_svm import JapanSVM
 from custom_components.hyundai_jp._api.svm_image import render_views
 from custom_components.hyundai_jp._api.Vehicle import Vehicle, VehicleSupports
 
@@ -59,9 +59,9 @@ def test_completed_camera_capture_decodes_and_renders_all_five_views(
             }
         }
     }
-    adapter = JapanSVM()
+    adapter = HyundaiBluelinkApi()
     adapter.data_timezone = ZoneInfo("Asia/Tokyo")
-    adapter._control_headers = Mock(return_value={"Authorization": "control"})
+    adapter._get_control_headers = Mock(return_value={"Authorization": "control"})
     adapter._vehicle_headers = Mock(return_value={"Authorization": "oauth"})
     adapter._payload = lambda body: body["resMsg"]
     adapter._request = Mock(

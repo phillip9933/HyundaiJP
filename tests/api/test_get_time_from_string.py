@@ -1,4 +1,4 @@
-"""Unit tests for ApiImplType1._get_time_from_string.
+"""Unit tests for JapanTelemetry._get_time_from_string.
 
 Covers the unset-timer case (issue #1206): API returns "0000" when no
 departure/off-peak timer is configured; the parser must return None
@@ -13,13 +13,13 @@ import datetime as dt
 
 import pytest
 
-from custom_components.hyundai_jp._api.ApiImplType1 import ApiImplType1
+from custom_components.hyundai_jp._api.telemetry import JapanTelemetry
 
 
 @pytest.fixture
-def type1_api() -> ApiImplType1:
+def type1_api() -> JapanTelemetry:
     # Instantiate without __init__ to avoid network/credential setup.
-    api = ApiImplType1.__new__(ApiImplType1)
+    api = JapanTelemetry()
     return api
 
 

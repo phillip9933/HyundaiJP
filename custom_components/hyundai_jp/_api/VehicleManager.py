@@ -6,13 +6,7 @@ import logging
 from threading import RLock
 from typing import Any
 
-from .ApiImpl import (
-    ApiImpl,
-    ClimateRequestOptions,
-    POIInfo,
-    ScheduleChargingClimateRequestOptions,
-    WindowRequestOptions,
-)
+from .client import HyundaiBluelinkApi
 from .const import (
     CHARGE_PORT_ACTION,
     DOMAIN,
@@ -21,7 +15,12 @@ from .const import (
     VEHICLE_LOCK_ACTION,
 )
 from .exceptions import AuthenticationError
-from .KiaUvoApiJP import KiaUvoApiJP
+from .options import (
+    ClimateRequestOptions,
+    POIInfo,
+    ScheduleChargingClimateRequestOptions,
+    WindowRequestOptions,
+)
 from .svm import SVMDetails
 from .Token import Token
 from .Vehicle import Vehicle
@@ -45,7 +44,7 @@ class VehicleManager:
         self.geocode_api_use_email: bool = geocode_api_use_email
         self.pin: str = pin
 
-        self.api: ApiImpl = KiaUvoApiJP()
+        self.api = HyundaiBluelinkApi()
 
         self.token: Token | None = token
         self.vehicles: dict[str, Vehicle] = {}
@@ -76,7 +75,7 @@ class VehicleManager:
     def get_token(self) -> Token:
         """Return an authenticated token; never submit a request before login."""
         if self.token is None:
-            raise AuthenticationError("Sign in to HyundaiJP first")
+            raise AuthenticationError("Sign in to Hyundai Bluelink JP first")
         return self.token
 
     def initialize_vehicles(self) -> None:
@@ -90,7 +89,7 @@ class VehicleManager:
 
     @property
     def supported_commands(self) -> frozenset[str] | None:
-        """Advertised command names; None retains existing regional behavior."""
+        """Command names implemented by the bundled Japan client."""
         return self.api.supported_commands
 
     def get_local_diagnostics(self) -> dict[str, Any]:
@@ -153,8 +152,7 @@ class VehicleManager:
     def get_svm_details(self, vehicle_id: str) -> SVMDetails:
         """Return the latest cached SVM composite image and metadata.
 
-        Delegates to the region-specific API implementation. Raises
-        NotImplementedError on regions without SVM support.
+        Reads this account's completed capture cache without waking the car.
         """
         return self.api.get_svm_details(self.get_token(), self.get_vehicle(vehicle_id))
 

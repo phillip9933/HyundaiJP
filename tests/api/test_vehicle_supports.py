@@ -3,8 +3,8 @@
 import dataclasses
 
 from custom_components.hyundai_jp._api import VehicleSupports
-from custom_components.hyundai_jp._api.ApiImpl import ApiImpl
-from custom_components.hyundai_jp._api.ApiImplType1 import ApiImplType1
+from custom_components.hyundai_jp._api.client import HyundaiBluelinkApi
+from custom_components.hyundai_jp._api.telemetry import JapanTelemetry
 from custom_components.hyundai_jp._api.Vehicle import Vehicle
 
 
@@ -25,9 +25,6 @@ def test_vehicle_supports_not_shared_between_vehicles():
 
 def test_api_holds_no_supports_attributes():
     """Support lives on vehicle.supports, not on the API."""
-    for api_cls in (
-        ApiImpl,
-        ApiImplType1,
-    ):
+    for api_cls in (HyundaiBluelinkApi, JapanTelemetry):
         flat = [name for name in dir(api_cls) if "supports" in name]
         assert flat == [], api_cls.__name__

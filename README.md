@@ -71,6 +71,13 @@ entities and the coordinator live in its parent directory. Other regions are not
 included. Keep shared helpers that Japan uses and test them alongside the Japan
 adapter.
 
+The coordinator owns polling, command serialization and shutdown. `svm_cache.py`
+keeps camera captures and rendered views locally, using the coordinator’s tracked
+executor. In the bundled API, `client.py` connects the authentication, commands,
+SVM and telemetry components. `authentication.py` handles login and HTTP response
+envelopes, `http.py` owns the bounded HTTP session, `options.py` holds request
+models, and `telemetry.py` parses both Japan status formats.
+
 GitHub checks run offline regression tests, lint, formatting, typing and package
 validation. Builds contain the integration and its API together. GitHub Actions
 does not use a Bluelink account or send vehicle commands. Real vehicle testing is

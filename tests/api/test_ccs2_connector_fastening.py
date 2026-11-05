@@ -8,16 +8,16 @@ must not raise.
 
 import pytest
 
-from custom_components.hyundai_jp._api.ApiImplType1 import ApiImplType1
 from custom_components.hyundai_jp._api.const import CONNECTOR_FASTENING_STATE
+from custom_components.hyundai_jp._api.telemetry import JapanTelemetry
 from custom_components.hyundai_jp._api.Vehicle import Vehicle
 from tests.api.fixture_helpers import load_fixture
 
 STATE_FIXTURE = "ccs2_ev9_2024_ccs2.json"
 
 
-def _type1_api() -> ApiImplType1:
-    api = ApiImplType1.__new__(ApiImplType1)
+def _type1_api() -> JapanTelemetry:
+    api = JapanTelemetry()
     api.data_timezone = None
     api.temperature_range = [x * 0.5 for x in range(28, 60)]
     return api

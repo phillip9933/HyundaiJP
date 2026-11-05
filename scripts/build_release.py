@@ -65,7 +65,7 @@ def release_files(root: Path, version: str | None = None) -> dict[str, bytes]:
         "__init__.py",
         "config_flow.py",
         "_api/__init__.py",
-        "_api/KiaUvoApiJP.py",
+        "_api/client.py",
     ):
         if required not in files:
             raise ValueError(f"Missing bundled runtime file: {required}")

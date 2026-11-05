@@ -7,6 +7,7 @@ from unittest.mock import Mock
 import pytest
 import requests
 
+from custom_components.hyundai_jp._api.client import HyundaiBluelinkApi
 from custom_components.hyundai_jp._api.const import ORDER_STATUS, VEHICLE_LOCK_ACTION
 from custom_components.hyundai_jp._api.exceptions import (
     APIError,
@@ -14,7 +15,6 @@ from custom_components.hyundai_jp._api.exceptions import (
     InvalidAPIResponseError,
     RequestTimeoutError,
 )
-from custom_components.hyundai_jp._api.KiaUvoApiJP import KiaUvoApiJP
 from custom_components.hyundai_jp._api.Token import Token
 from custom_components.hyundai_jp._api.Vehicle import Vehicle
 
@@ -33,7 +33,7 @@ def response(body, status=200):
 
 @pytest.fixture
 def setup():
-    api = KiaUvoApiJP()
+    api = HyundaiBluelinkApi()
     api.session = Mock()
     helper = Mock()
     helper.request_context = {
