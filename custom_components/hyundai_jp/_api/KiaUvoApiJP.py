@@ -5,6 +5,7 @@ execution. Fresh-status requests retain correlated MQTT completion checks.
 """
 
 import base64
+from contextlib import ExitStack
 import copy
 import datetime as dt
 import math
@@ -340,10 +341,14 @@ class KiaUvoApiJP(JapanCommandsMixin, JapanSVM, ApiImplType1):
                 helpers = [helper for _, helper in self._mqtt_sessions.values()]
                 self._mqtt_sessions.clear()
                 self._passive_state_observed_at.clear()
-        for helper in helpers:
-            helper.close()
-        # Finishing background work can recreate a pool after the first close.
-        self.session.close()
+        # ExitStack attempts every remaining cleanup even when one fails.
+        # Register HTTP first so it is closed after all MQTT helpers.
+        with ExitStack() as cleanup:
+            # Finishing background work can recreate a pool after the first
+            # close. Reclose the existing session without creating resources.
+            cleanup.callback(self.session.close)
+            for helper in reversed(helpers):
+                cleanup.callback(helper.close)
 
     def force_refresh_vehicle_state(self, token: Token, vehicle: Vehicle) -> None:
         """Wait for correlated completion and newer telemetry, never just an ACK."""

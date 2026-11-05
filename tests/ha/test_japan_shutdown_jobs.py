@@ -28,8 +28,13 @@ async def test_unlocked_japan_read_drains_before_shared_and_adapter_cleanup(
     events = []
     details = SimpleNamespace(captured_at=None, image_bytes=b"synthetic")
     read = Mock(return_value=details if operation == "svm" else True)
-    manager_close = Mock(side_effect=lambda: events.append("manager_closed"))
     adapter_close = Mock(side_effect=lambda: events.append("adapter_closed"))
+
+    def close_owned_api():
+        events.append("manager_closed")
+        adapter_close()
+
+    manager_close = Mock(side_effect=close_owned_api)
     result.vehicle_manager = SimpleNamespace(
         get_svm_details=read,
         check_and_refresh_token=read,

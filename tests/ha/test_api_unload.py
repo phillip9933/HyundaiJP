@@ -88,6 +88,7 @@ async def test_unload_drains_existing_command_and_blocks_new_commands(monkeypatc
     entered, finish = asyncio.Event(), asyncio.Event()
     close = Mock()
     result.vehicle_manager.api.close = close
+    result.vehicle_manager.close.side_effect = close
     result.vehicle_manager.unlock = Mock(return_value="synthetic-action")
 
     async def executor(target, *args):

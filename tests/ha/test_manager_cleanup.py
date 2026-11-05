@@ -32,6 +32,13 @@ def coordinator(manager):
     )
     if not hasattr(manager, "api"):
         manager.api = SimpleNamespace(close=Mock())
+    owned_close = manager.close
+
+    def close_owned_api():
+        owned_close()
+        manager.api.close()
+
+    manager.close = Mock(side_effect=close_owned_api)
     result.vehicle_manager = manager
     result._action_lock = asyncio.Lock()
     return result
@@ -118,7 +125,8 @@ async def test_cleanup_failure_is_sanitized_and_does_not_block_unload(
     assert await hyundai_jp.async_unload_entry(hass, entry)
 
     assert hass.data[DOMAIN] == {}
-    assert "Unable to shut down vehicle connection (RuntimeError)" in caplog.text
+    assert "Unable to shut down vehicle connection (HomeAssistantError)" in caplog.text
+    assert "Japan shutdown vehicle manager failed (RuntimeError)" in caplog.text
     assert "PRIVATE_ACCOUNT_DATA" not in caplog.text
     services.assert_called_once_with(hass)
 
@@ -156,10 +164,11 @@ async def test_manager_cleanup_runs_even_when_polling_shutdown_fails(stop_pollin
     close = Mock()
     result = coordinator(SimpleNamespace(close=close))
 
-    with pytest.raises(RuntimeError) as info:
+    with pytest.raises(HomeAssistantError) as info:
         await result.async_shutdown()
 
-    assert info.value is error
+    assert str(info.value) == "Japan shutdown polling failed (RuntimeError)"
+    assert str(error) not in str(info.value)
     close.assert_called_once()
 
 
@@ -262,9 +271,9 @@ async def test_no_api_jobs_submitted_after_shutdown(stop_polling):
         await result._async_api_job(target)
 
     assert result.hass.async_add_executor_job.await_args_list == [
-        call(close),
-        call(result.vehicle_manager.api.close),
+        call(result.vehicle_manager.close),
     ]
+    result.vehicle_manager.api.close.assert_called_once()
     target.assert_not_called()
 
 

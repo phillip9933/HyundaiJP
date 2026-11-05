@@ -96,6 +96,7 @@ async def test_shutdown_drains_active_reader_then_closes_and_rejects_new_watch(
     entered = asyncio.Event()
     release = asyncio.Event()
     close = result.vehicle_manager.api.close
+    result.vehicle_manager.close.side_effect = close
     monkeypatch.setattr(
         "custom_components.hyundai_jp.coordinator.DataUpdateCoordinator.async_shutdown",
         AsyncMock(),

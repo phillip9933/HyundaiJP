@@ -87,6 +87,7 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Initialize."""
         self._action_lock = asyncio.Lock()
         self._shutdown_started = False
+        self._shutdown_task: asyncio.Task[None] | None = None
         self._api_jobs: set[asyncio.Future[Any]] = set()
         self._svm_details: dict[str, SVMDetails] = {}
         # Per-vehicle SVM fisheye dewarp toggle (local UI state, off by default).
@@ -183,25 +184,6 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 *getattr(self, "_api_jobs", ()), return_exceptions=True
             )
             await self.hass.async_add_executor_job(self.vehicle_manager.close)
-
-    async def _async_stop_polling_and_close_manager(self) -> None:
-        """Stop polling, drain running API work and release the manager."""
-        self._shutdown_started = True
-        try:
-            await super().async_shutdown()
-        finally:
-            shutdown = asyncio.create_task(self._async_close_manager())
-            cancelled = False
-            while True:
-                try:
-                    await asyncio.shield(shutdown)
-                    break
-                except asyncio.CancelledError:
-                    if shutdown.cancelled():
-                        raise
-                    cancelled = True
-            if cancelled:
-                raise asyncio.CancelledError
 
     async def _async_poll_data(self) -> dict[str, Any]:
         """Update data via library. Called by update_coordinator periodically.
@@ -595,14 +577,46 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return await self._async_complete_operation(self._async_api_job(target, *args))
 
     async def async_shutdown(self) -> None:
-        """Drain active Japan operations before disposing of their API sessions."""
+        """Share one shielded cleanup across explicit and HA unload callbacks."""
         self._closing = True
-        await self._async_complete_operation(self._async_shutdown_resources())
+        self._shutdown_started = True
+        shutdown = getattr(self, "_shutdown_task", None)
+        if shutdown is None:
+            shutdown = self._shutdown_task = asyncio.create_task(
+                self._async_shutdown_resources(), name="HyundaiJP shutdown"
+            )
+        await self._async_complete_operation(shutdown)
 
     async def _async_shutdown_resources(self) -> None:
-        await self._async_stop_polling_and_close_manager()
-        await self._async_stop_post_command_state_watchers()
-        await self._async_close_api()
+        """Stop scheduling and drain work before releasing owned resources."""
+        errors: list[tuple[str, BaseException]] = []
+
+        async def cleanup(stage: str, operation: Awaitable[None]) -> bool:
+            try:
+                await operation
+            except (Exception, asyncio.CancelledError) as err:
+                errors.append((stage, err))
+                _LOGGER.warning(
+                    "Japan shutdown %s failed (%s)", stage, type(err).__name__[:64]
+                )
+                return False
+            return True
+
+        await cleanup("polling", super().async_shutdown())
+        await cleanup("state watchers", self._async_stop_post_command_state_watchers())
+        if not await cleanup("vehicle manager", self._async_close_manager()):
+            # The manager normally owns API cleanup. If it fails before doing
+            # so, still attempt to release the already-created API resources.
+            await cleanup("vehicle API", self._async_close_api())
+        if errors:
+            stage, error = errors[0]
+            if isinstance(error, asyncio.CancelledError):
+                raise error from None
+            # HA also invokes this method directly from its unload callback.
+            # Keep vendor exception text out of that task's error logger.
+            raise HomeAssistantError(
+                f"Japan shutdown {stage} failed ({type(error).__name__[:64]})"
+            ) from None
 
     async def _async_close_api(self) -> None:
         async with self._action_lock:
