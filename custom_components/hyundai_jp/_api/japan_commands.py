@@ -32,9 +32,10 @@ from .const import (
     WINDOW_STATE,
 )
 from .control_validation import (
+    CLIMATE_DURATION_MAX,
+    CLIMATE_DURATION_MIN,
     is_finite_number,
     is_integer,
-    is_number,
     vehicle_identifier,
 )
 from .exceptions import (
@@ -664,7 +665,7 @@ class JapanCommandsMixin:
             else options.temperature
         )
         if temperature is not None and options.temperature_unit == 1:
-            if not is_number(temperature):
+            if not is_finite_number(temperature):
                 raise ValueError("Japan schedule temperature must be numeric")
             temperature = (temperature - 32) * 5 / 9
         climate_enabled = (
@@ -695,7 +696,7 @@ class JapanCommandsMixin:
                     "hvacTempType", profile.get("option", {}).get("hvacTempType")
                 )
                 valid = self._temperature_values(vehicle, hvac_type)
-                if not is_number(temperature):
+                if not is_finite_number(temperature):
                     raise ValueError("Japan schedule temperature must be numeric")
                 matched = next(
                     (
@@ -873,11 +874,28 @@ class JapanCommandsMixin:
             "timeSection": int(value >= dt.time(12)),
         }
 
+    def start_climate(
+        self, token: Token, vehicle: Vehicle, options: ClimateRequestOptions
+    ) -> str:
+        """Submit the supported numeric Celsius Japan climate envelope."""
+        payload = self.build_climate_payload(vehicle, options)
+        return self._japan_command(token, vehicle, "control/temperature", payload)
+
     def build_climate_payload(
         self, vehicle: Vehicle, options: ClimateRequestOptions
     ) -> dict[str, Any]:
         """Validate and construct a climate envelope without I/O or state writes."""
         profile = self._japan_profile_section(vehicle, "option")
+        payload = self._climate_base_payload(vehicle, options, profile)
+        self._apply_climate_duration(options, profile, payload)
+        self._apply_climate_seats(options, profile, payload)
+        self._apply_climate_heaters(options, profile, payload)
+        return payload
+
+    def _climate_base_payload(
+        self, vehicle: Vehicle, options: ClimateRequestOptions, profile: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Validate a Celsius setpoint and profile before building the start envelope."""
         hvac_type = (
             options.hvac_temp_type
             if options.hvac_temp_type is not None
@@ -894,11 +912,7 @@ class JapanCommandsMixin:
             if options.set_temp is not None
             else vehicle.air_temperature
         )
-        if (
-            isinstance(temp, bool)
-            or not isinstance(temp, (int, float))
-            or not math.isfinite(temp)
-        ):
+        if not is_finite_number(temp):
             raise ValueError("Japan climate temperature must be finite")
         bounds = vehicle.supports.climate_temperature_range
         if bounds is not None and not bounds[0] <= temp <= bounds[1]:
@@ -906,12 +920,7 @@ class JapanCommandsMixin:
                 "Japan temperature is outside the established profile range"
             )
         # Verify that the app's profile-dependent code decoder accepts the setpoint.
-        temperatures = [
-            self._legacy_temperature(
-                vehicle, {"unit": 0, "hvacTempType": hvac_type, "value": f"{code:02X}H"}
-            )
-            for code in range(0x40)
-        ]
+        temperatures = self._temperature_values(vehicle, hvac_type)
         if temp not in temperatures:
             raise ValueError(
                 "Japan temperature is outside the established profile range"
@@ -933,18 +942,32 @@ class JapanCommandsMixin:
             "hvacTempType": hvac_type,
             "tempUnit": "C",
         }
+        return payload
+
+    def _apply_climate_duration(
+        self,
+        options: ClimateRequestOptions,
+        profile: dict[str, Any],
+        payload: dict[str, Any],
+    ) -> None:
+        """A requested ignition duration needs its own established capability."""
         if options.duration is not None:
             if not self._japan_capability(profile.get("clmtCtrlOption")):
                 raise UnsupportedControlError(
                     "Japan ignition duration capability is absent"
                 )
             if (
-                isinstance(options.duration, bool)
-                or not isinstance(options.duration, int)
-                or not 1 <= options.duration <= 10
+                not is_integer(options.duration)
+                or not CLIMATE_DURATION_MIN <= options.duration <= CLIMATE_DURATION_MAX
             ):
                 raise ValueError("Japan ignition duration is invalid")
             payload["ignitionDuration"] = options.duration
+
+    @staticmethod
+    def _apply_climate_seats(
+        options: ClimateRequestOptions, profile: dict[str, Any], payload: dict[str, Any]
+    ) -> None:
+        """Map physical seat choices to the driver's reported orientation."""
         seats = profile.get("seatHeaterVent", {})
         location = profile.get("drvSeatLoc")
         seat_values = (
@@ -985,15 +1008,17 @@ class JapanCommandsMixin:
                     raise UnsupportedControlError(
                         "Japan seat climate capability is absent"
                     )
-                if (
-                    isinstance(value, bool)
-                    or not isinstance(value, int)
-                    or not 1 <= value <= 8
-                ):
+                if not is_integer(value) or not 1 <= value <= 8:
                     raise ValueError("Japan seat climate command is invalid")
                 seat_payload[field] = value
             payload["drvSeatLoc"] = location
             payload["seatClimateInfo"] = seat_payload
+
+    @staticmethod
+    def _apply_climate_heaters(
+        options: ClimateRequestOptions, profile: dict[str, Any], payload: dict[str, Any]
+    ) -> None:
+        """Keep combined and separate heater profiles on their existing wire paths."""
         if options.defrost is not None:
             if not isinstance(options.defrost, bool):
                 raise ValueError("Japan defrost must be boolean")
@@ -1025,14 +1050,6 @@ class JapanCommandsMixin:
             or options.side_rear_mirror_heating is not None
         ):
             raise UnsupportedControlError("Japan separate heater capability is absent")
-        return payload
-
-    def start_climate(
-        self, token: Token, vehicle: Vehicle, options: ClimateRequestOptions
-    ) -> str:
-        """Submit the supported numeric Celsius Japan climate envelope."""
-        payload = self.build_climate_payload(vehicle, options)
-        return self._japan_command(token, vehicle, "control/temperature", payload)
 
     def set_charge_limits(
         self, token: Token, vehicle: Vehicle, ac: int, dc: int

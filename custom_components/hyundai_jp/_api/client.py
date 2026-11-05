@@ -949,7 +949,7 @@ class HyundaiBluelinkApi(JapanCommandsMixin, JapanSVM, JapanAuthClient):
             timestamp = parse_datetime(location["time"], self.data_timezone)
             if timestamp is None:
                 raise ValueError
-        except KeyError, TypeError, ValueError:
+        except KeyError, TypeError, ValueError, OverflowError:
             raise InvalidAPIResponseError(
                 "Japan cached location is incomplete"
             ) from None

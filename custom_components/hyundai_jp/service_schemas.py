@@ -9,6 +9,8 @@ from homeassistant.const import ATTR_DEVICE_ID
 from homeassistant.helpers import config_validation as cv
 import voluptuous as vol
 
+from ._api.control_validation import CLIMATE_DURATION_MAX, CLIMATE_DURATION_MIN
+
 
 def _text(value: Any) -> str:
     if not isinstance(value, str):
@@ -27,8 +29,8 @@ def _number(value: Any) -> float:
         raise vol.Invalid("expected a number")
     try:
         result = float(value)
-    except ValueError as err:
-        raise vol.Invalid("expected a number") from err
+    except ValueError, OverflowError:
+        raise vol.Invalid("expected a number") from None
     if not math.isfinite(result):
         raise vol.Invalid("expected a finite number")
     return result
@@ -96,7 +98,9 @@ SERVICE_SCHEMAS = {
 SERVICE_SCHEMAS["start_climate"] = _schema(
     {
         vol.Optional("duration"): _optional(
-            vol.All(_integer, vol.Range(min=1, max=30))
+            vol.All(
+                _integer, vol.Range(min=CLIMATE_DURATION_MIN, max=CLIMATE_DURATION_MAX)
+            )
         ),
         vol.Optional("temperature"): _optional(TEMPERATURE),
         vol.Optional("climate"): BOOL,

@@ -25,7 +25,12 @@ def is_number(value: object) -> TypeGuard[int | float]:
 
 def is_finite_number(value: object) -> TypeGuard[int | float]:
     """Accept the same int/float inputs as controls, excluding booleans and NaN."""
-    return is_number(value) and math.isfinite(value)
+    if not is_number(value):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
 
 
 def is_integer(value: object) -> TypeGuard[int]:
