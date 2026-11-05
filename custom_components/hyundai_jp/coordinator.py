@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from dataclasses import replace
 import datetime as dt
 from datetime import timedelta
 import logging
@@ -1001,6 +1002,62 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "start climate",
             command="start_climate",
         )
+
+    _CLIMATE_RESTART_DELAY_SECONDS = 5
+
+    async def _async_wait_for_climate_restart(self) -> None:
+        """Preserve the app-confirmed pause without holding an executor thread."""
+        await asyncio.sleep(self._CLIMATE_RESTART_DELAY_SECONDS)
+
+    async def async_change_climate_temperature(
+        self, vehicle_id: str, climate_options: ClimateRequestOptions
+    ) -> None:
+        """Own validation, stop, pause and restart as one serialized operation."""
+        self._require_command("stop_climate")
+        self._require_command("start_climate")
+        async with self._async_region_operation():
+            options = replace(climate_options)
+            await self._async_complete_operation(
+                self._async_change_climate_temperature_locked(vehicle_id, options)
+            )
+
+    async def _async_change_climate_temperature_locked(
+        self, vehicle_id: str, options: ClimateRequestOptions
+    ) -> None:
+        try:
+            await self._async_run_executor_job(
+                self.vehicle_manager.validate_climate_options, vehicle_id, options
+            )
+        except (ValueError, UnsupportedControlError) as err:
+            raise HomeAssistantError(
+                f"Cannot change climate temperature: {err}"
+            ) from None
+        try:
+            await self._async_send_action_locked(
+                vehicle_id,
+                lambda: self.vehicle_manager.stop_climate(vehicle_id),
+                "stop climate",
+                False,
+            )
+        except _ConfirmedCommandRefreshError as err:
+            raise HomeAssistantError(
+                "The climate stop request was accepted, but its updated state "
+                "could not be retrieved. Restart was not sent; check vehicle status."
+            ) from err
+        try:
+            await self._async_wait_for_climate_restart()
+            self._ensure_not_closing()
+            await self._async_send_action_locked(
+                vehicle_id,
+                lambda: self.vehicle_manager.start_climate(vehicle_id, options),
+                "start climate",
+                False,
+            )
+        except HomeAssistantError as err:
+            raise HomeAssistantError(
+                "The climate stop request was accepted, but the restart outcome "
+                "was not confirmed. Check vehicle status before retrying."
+            ) from err
 
     async def async_stop_climate(self, vehicle_id: str) -> None:
         await self._async_send_action(
