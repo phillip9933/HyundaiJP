@@ -74,10 +74,7 @@ def test_ordinary_app_endpoints_complete_with_service_acceptance(setup, endpoint
         token, vehicle, endpoint["suffix"], {}, ccs2=endpoint["ccs2"]
     )
     assert action
-    assert (
-        api.check_action_status(token, vehicle, action, True, 60)
-        == ORDER_STATUS.ACCEPTED
-    )
+    assert api.check_action_status(token, vehicle, action) == ORDER_STATUS.ACCEPTED
     assert api.check_action_status(token, vehicle, action) != ORDER_STATUS.SUCCESS
     sent = api.session.request.call_args
     prefix = "/ccs2/" if endpoint["ccs2"] else "/"
@@ -183,7 +180,7 @@ def test_composite_receipts_preserve_acceptance_distinction(setup, states, expec
     for i, state in enumerate(states):
         api._remember_japan_action(str(i), vehicle.id, status=state)
     api._remember_japan_action("combined", vehicle.id, ("0", "1"))
-    assert api.check_action_status(token, vehicle, "combined", True, 60) == expected
+    assert api.check_action_status(token, vehicle, "combined") == expected
     helper.status.assert_not_called()
     helper.close.assert_not_called()
 

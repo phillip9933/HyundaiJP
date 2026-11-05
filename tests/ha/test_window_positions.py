@@ -24,7 +24,6 @@ async def test_front_only_profile_omits_rear_controls_but_keeps_rear_telemetry()
     result = vehicle(("front_left", "front_right"))
     coordinator = make_coordinator(result)
     coordinator.__class__ = JapanDataUpdateCoordinator
-    coordinator.supports_command = lambda command: command == "set_windows_state"
     hass, entry = make_hass(coordinator)
     controls = []
     await cover.async_setup_entry(hass, entry, controls.extend)

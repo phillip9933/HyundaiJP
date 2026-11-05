@@ -38,7 +38,6 @@ async def controls(monkeypatch):
     manager = Mock(spec=VehicleManager)
     manager.vehicles = {vehicle.id: vehicle}
     manager.get_vehicle.side_effect = manager.vehicles.__getitem__
-    manager.supported_commands = None
     manager.api = SimpleNamespace(close=Mock())
     manager.close.side_effect = manager.api.close
     manager.check_action_status.return_value = ORDER_STATUS.ACCEPTED
@@ -254,9 +253,6 @@ async def test_unknown_baseline_rejects_older_sample_within_request_second(monke
 async def test_charge_port_exists_even_when_windows_are_unsupported():
     vehicle = Vehicle(id="synthetic", ev_charge_port_door_is_open=False)
     coordinator = make_coordinator(vehicle)
-    coordinator.supports_command.side_effect = lambda command: (
-        command == "charge_port_action"
-    )
     hass, entry = make_hass(coordinator)
     added = Mock()
     await async_setup_entry(hass, entry, added)

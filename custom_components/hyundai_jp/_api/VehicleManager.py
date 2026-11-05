@@ -92,11 +92,6 @@ class VehicleManager:
         for vehicle in vehicles:
             self.vehicles[vehicle.id] = vehicle
 
-    @property
-    def supported_commands(self) -> frozenset[str] | None:
-        """Command names implemented by the bundled Japan client."""
-        return self.api.supported_commands
-
     def get_local_diagnostics(self) -> dict[str, Any]:
         """Read protocol diagnostics without contacting the service or vehicle."""
         return self.api.get_local_diagnostics()
@@ -280,40 +275,14 @@ class VehicleManager:
             self.get_token(), self.get_vehicle(vehicle_id), options
         )
 
-    def check_action_status(
-        self,
-        vehicle_id: str,
-        action_id: str,
-        synchronous: bool = False,
-        timeout: int = 120,
-    ) -> ORDER_STATUS:
-        """
-        Check for the status of a sent action/command.
+    def check_action_status(self, vehicle_id: str, action_id: str) -> ORDER_STATUS:
+        """Read a local submission receipt without polling or replaying a command.
 
-        Actions can have 4 states:
-        - pending: request sent to vehicle, waiting for response
-        - success: vehicle confirmed that the action was performed
-        - fail: vehicle could not perform the action
-                (most likely because a condition was not met)
-        - vehicle timeout: request sent to vehicle, no response received.
-
-        In case of timeout, the API can return "pending" for up to 2 minutes before
-        it returns a final state.
-
-        :param vehicle_id: ID of the vehicle
-        :param action_id: ID of the action
-        :param synchronous: Whether to wait for pending actions to reach a final
-                            state (success/fail/timeout)
-        :param timeout:
-            Time in seconds to wait for pending actions to reach a final state.
-        :return: status of the order
+        ACCEPTED means the cloud accepted the request. Only subsequent fresh
+        telemetry establishes the vehicle's resulting physical state.
         """
         return self.api.check_action_status(
-            self.get_token(),
-            self.get_vehicle(vehicle_id),
-            action_id,
-            synchronous,
-            timeout,
+            self.get_token(), self.get_vehicle(vehicle_id), action_id
         )
 
     def open_charge_port(self, vehicle_id: str) -> str:

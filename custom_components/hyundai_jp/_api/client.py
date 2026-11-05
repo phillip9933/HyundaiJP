@@ -50,27 +50,6 @@ class HyundaiBluelinkApi(JapanCommandsMixin, JapanSVM, JapanAuthClient):
     # Legacy temperature conversion uses per-vehicle Japan profile metadata.
     temperature_range: tuple[float, ...] = ()
 
-    supported_commands = frozenset(
-        {
-            "request_svm_capture",
-            "lock_action",
-            "start_charge",
-            "stop_charge",
-            "start_climate",
-            "stop_climate",
-            "set_charge_limits",
-            "set_charging_current",
-            "set_windows_state",
-            "charge_port_action",
-            "start_hazard_lights",
-            "start_hazard_lights_and_horn",
-            "set_vehicle_to_load_discharge_limit",
-            "schedule_charging_and_climate",
-            "valet_mode_action",
-            "set_navigation",
-        }
-    )
-
     def __init__(self) -> None:
         super().__init__()
         self._telemetry = JapanTelemetry(self.data_timezone, self.temperature_range)

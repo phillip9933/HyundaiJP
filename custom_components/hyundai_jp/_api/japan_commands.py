@@ -322,8 +322,6 @@ class JapanCommandsMixin:
         token: Token,
         vehicle: Vehicle,
         action_id: str,
-        synchronous: bool = False,
-        timeout: int = 0,
     ) -> ORDER_STATUS:
         """Return a local service receipt, never fabricate vehicle execution."""
         vehicle_id = self._command_vehicle_id(vehicle)

@@ -44,11 +44,6 @@ def api():
     return result
 
 
-def test_japan_capabilities():
-    api = HyundaiBluelinkApi()
-    assert "schedule_charging_and_climate" in api.supported_commands
-
-
 @pytest.mark.parametrize(
     "epoch,expected",
     [

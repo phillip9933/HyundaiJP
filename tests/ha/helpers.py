@@ -51,13 +51,7 @@ def make_operation_coordinator() -> JapanDataUpdateCoordinator:
     """Supply controllable command/status jobs around real coordinator state."""
     result = make_runtime_coordinator()
     result.vehicle_manager = MagicMock()
-    result.vehicle_manager.api = SimpleNamespace(
-        requires_command_confirmation=True,
-        supports_remote_commands=True,
-        supports_force_refresh=True,
-        supported_commands=None,
-    )
-    result.vehicle_manager.supported_commands = None
+    result.vehicle_manager.api = SimpleNamespace()
     result.vehicle_manager.apply_cached_mqtt_state.side_effect = lambda vehicle_id: (
         VehicleManager.apply_cached_mqtt_state(result.vehicle_manager, vehicle_id)
     )

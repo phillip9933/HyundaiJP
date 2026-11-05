@@ -181,7 +181,7 @@ def test_unknown_or_other_vehicle_request_never_reports_success():
         == ORDER_STATUS.UNKNOWN
     )
     assert (
-        api.check_action_status(token, vehicle, "synthetic-action", True, 500)
+        api.check_action_status(token, vehicle, "synthetic-action")
         == ORDER_STATUS.ACCEPTED
     )
     api.helper.status.assert_not_called()
@@ -249,10 +249,7 @@ def test_broker_outcome_never_relabels_an_http_acceptance(broker_status):
     api, token, vehicle = setup()
     action = api.start_charge(token, vehicle)
     api.helper.status.return_value = broker_status
-    assert (
-        api.check_action_status(token, vehicle, action, True, 60)
-        == ORDER_STATUS.ACCEPTED
-    )
+    assert api.check_action_status(token, vehicle, action) == ORDER_STATUS.ACCEPTED
     assert api.check_action_status(token, vehicle, action) != ORDER_STATUS.SUCCESS
     api.helper.track.assert_not_called()
     api.helper.status.assert_not_called()
