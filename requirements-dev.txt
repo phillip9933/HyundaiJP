@@ -1,8 +1,9 @@
 # Python 3.14. Runtime requirements are installed from the integration manifest.
-homeassistant==2026.9.2
+# HA is selected by scripts/install_dependencies.py (default: hacs.json minimum).
 mypy==2.3.1
 pytest==9.1.1
 pytest-asyncio==1.4.0
+pytest-cov==7.1.0
 pytest-socket==0.8.1
 ruff==0.17.3
 types-requests==2.32.4.20250913

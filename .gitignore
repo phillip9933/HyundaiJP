@@ -7,6 +7,7 @@ __pycache__/
 /dist/
 /build/
 coverage.xml
+coverage.json
 .coverage
 .env
 private/
