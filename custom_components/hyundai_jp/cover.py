@@ -14,6 +14,7 @@ from homeassistant.components.cover import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from ._api import Vehicle, WindowRequestOptions
@@ -92,7 +93,6 @@ class HyundaiBluelinkCover(CoverEntity, HyundaiBluelinkEntity):
     _attr_supported_features = (
         CoverEntityFeature.OPEN
         | CoverEntityFeature.CLOSE
-        | CoverEntityFeature.STOP
         | CoverEntityFeature.SET_POSITION
     )
     _attr_entity_category = EntityCategory.CONFIG
@@ -143,9 +143,8 @@ class HyundaiBluelinkCover(CoverEntity, HyundaiBluelinkEntity):
         await self.coordinator.async_set_windows(self.vehicle.id, options)
 
     async def async_stop_cover(self, **kwargs: Any) -> None:
-        """Stop the window (the API has no stop, so this closes it)."""
-        options = self._window_options(WINDOW_STATE.CLOSED)
-        await self.coordinator.async_set_windows(self.vehicle.id, options)
+        """The Japan API has no independent window stop command."""
+        raise HomeAssistantError("Remote window stopping is not supported")
 
     async def async_set_cover_position(self, **kwargs: Any) -> None:
         """Set the window to closed (0), vent (1-49) or open (50-100)."""
