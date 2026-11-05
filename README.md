@@ -20,9 +20,9 @@ Requires Home Assistant 2026.9.2 or newer and HACS.
    setting up HyundaiJP so both integrations do not poll the same car.
 2. Open **HACS → ⋮ → Custom repositories**. Add
    `https://github.com/phillip9933/HyundaiJP` and choose **Integration**.
-3. Find **HyundaiJP** in HACS and download a release. For a beta release, enable
-   **Show beta versions** in its HACS menu, then select the beta version in
-   **Download / Redownload**.
+3. Find **HyundaiJP** in HACS and download the latest numbered release
+   (`v0.1.0` or newer). For optional beta releases, enable **Show beta versions**
+   in its HACS menu, then select the beta version in **Download / Redownload**.
 4. Restart Home Assistant.
 5. Open **Settings → Devices & services → Add integration**, search for
    **HyundaiJP**, and enter your Japan Bluelink username, password and PIN.
@@ -36,6 +36,11 @@ one.
 Future releases appear in HACS. Install the update and restart Home Assistant;
 there is no need to upload another ZIP. HACS may take time to discover a release;
 use **Update information** on the repo if needed.
+
+If a previous install failed with a download URL containing
+`releases/download/main/hyundai_jp.zip`, use **Update information**, then select
+**Download / Redownload → v0.1.0** (or newer). `main` is a source branch, not a
+release asset. This happened when only the first beta release was available.
 
 [HACS custom repo instructions](https://hacs.xyz/docs/faq/custom_repositories/)
 · [HACS downloads and version selection](https://hacs.xyz/docs/use/repositories/dashboard/)
@@ -68,7 +73,9 @@ validation. Builds contain the integration and its API together. GitHub Actions
 does not use a Bluelink account or send vehicle commands. Real vehicle testing is
 done separately by the owner.
 
-Use the repository's **Release** workflow to publish a new version. Each release
+Use the repository's **Release** workflow to publish a new version. Regular
+releases are the default so HACS can install without beta versions enabled;
+select **prerelease** explicitly when publishing a beta. Each release
 has a HACS-ready `hyundai_jp.zip`; earlier releases are retained for rollback.
 See [the workflows](.github/workflows) for exact checks and release steps.
 

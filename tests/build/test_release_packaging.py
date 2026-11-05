@@ -136,29 +136,31 @@ def test_published_versions_are_never_overwritten(
     )
 
 
+@pytest.mark.parametrize("version,prerelease", [("0.1.0b1", True), ("0.1.0", False)])
 def test_release_uploads_assets_before_publishing(
-    repository: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    repository: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    version: str,
+    prerelease: bool,
 ) -> None:
     github = Mock(side_effect=["[[]]", "[]", "{}", "", ""])
     monkeypatch.setattr(publish_release, "gh", github)
     monkeypatch.setattr(publish_release, "ROOT", repository)
-    publish_release.publish("0.1.0b1", True, "a" * 40, tmp_path / "dist")
+    publish_release.publish(version, prerelease, "a" * 40, tmp_path / "dist")
     calls = [call.args for call in github.call_args_list]
     assert "sha=" + "a" * 40 in calls[2]
-    assert calls[3][:3] == ("release", "create", "v0.1.0b1")
-    assert (
-        "--draft" in calls[3]
-        and "--verify-tag" in calls[3]
-        and "--prerelease" in calls[3]
-    )
+    assert calls[3][:3] == ("release", "create", f"v{version}")
+    assert "--draft" in calls[3] and "--verify-tag" in calls[3]
+    assert ("--prerelease" in calls[3]) is prerelease
     assert any(argument.endswith("hyundai_jp.zip") for argument in calls[3])
     assert any(argument.endswith("hyundai_jp.zip.sha256") for argument in calls[3])
     assert calls[4] == (
         "release",
         "edit",
-        "v0.1.0b1",
+        f"v{version}",
         "--draft=false",
-        "--latest=false",
+        f"--latest={str(not prerelease).lower()}",
     )
 
 
@@ -185,5 +187,5 @@ def test_workflows_keep_checks_and_safe_release_inputs() -> None:
     assert release["jobs"]["publish"]["needs"] == "checks"
     assert release["concurrency"]["cancel-in-progress"] == "false"
     assert (
-        release["on"]["workflow_dispatch"]["inputs"]["prerelease"]["default"] == "true"
+        release["on"]["workflow_dispatch"]["inputs"]["prerelease"]["default"] == "false"
     )

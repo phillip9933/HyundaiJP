@@ -5,12 +5,12 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version without v prefix (for example 0.1.0b1)"
+        description: "Version without v prefix (for example 0.1.1)"
         required: true
         type: string
       prerelease:
         description: "Mark as prerelease (enable prereleases in HACS to install)"
-        default: true
+        default: false
         type: boolean
 
 permissions:
