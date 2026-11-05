@@ -73,3 +73,23 @@ def test_device_identity_has_its_own_namespace():
         (DOMAIN, "synthetic"),
         (DOMAIN, "vin:SYNTHETIC_TEST_VIN"),
     }
+
+
+def test_runtime_requirements_allow_home_assistant_core_versions():
+    from packaging.requirements import Requirement
+
+    manifest = json.loads(
+        (Path(hyundai_jp.__file__).parent / "manifest.json").read_text()
+    )
+    requirements = {
+        requirement.name.lower(): requirement
+        for value in manifest["requirements"]
+        for requirement in [Requirement(value)]
+    }
+    # HA supplies these directly and hassfest rejects listing them again.
+    assert "requests" not in requirements
+    assert "pillow" not in requirements
+    # Additional integrations must accept HA's constrained package versions.
+    assert "2.1.0" in requirements["paho-mqtt"].specifier
+    assert "2.3.2" in requirements["numpy"].specifier
+    assert manifest["categories"] == ["vehicles_transport.cars_evs"]

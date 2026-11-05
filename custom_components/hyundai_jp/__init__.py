@@ -6,12 +6,15 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.device_registry import DeviceEntry
 
 from .const import DOMAIN
 from .coordinator import HyundaiKiaConnectDataUpdateCoordinator
 from .japan_coordinator import JapanDataUpdateCoordinator
 from .services import async_setup_services, async_unload_services
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -28,11 +31,6 @@ PLATFORMS: list[str] = [
     Platform.IMAGE,
     Platform.TIME,
 ]
-
-
-async def async_setup(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
-    """Set up the integration (config entries only, no YAML)."""
-    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:

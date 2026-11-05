@@ -1,6 +1,9 @@
 {
   "domain": "hyundai_jp",
   "name": "HyundaiJP",
+  "categories": [
+    "vehicles_transport.cars_evs"
+  ],
   "codeowners": [
     "@phillip9933"
   ],
@@ -13,10 +16,8 @@
     "custom_components.hyundai_jp"
   ],
   "requirements": [
-    "requests==2.34.2",
-    "paho-mqtt==2.1.0",
-    "Pillow==12.3.0",
-    "numpy==2.5.4"
+    "paho-mqtt>=2.1.0,<3",
+    "numpy>=1.26,<3"
   ],
   "version": "0.1.0b1"
 }
