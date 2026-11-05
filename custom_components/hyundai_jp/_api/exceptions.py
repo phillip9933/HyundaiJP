@@ -7,69 +7,15 @@ class HyundaiKiaException(Exception):
     """
 
 
-class PINMissingError(HyundaiKiaException):
-    """
-    Raised upon receipt of an authentication error.
-    """
-
-
 class AuthenticationError(HyundaiKiaException):
     """
     Raised upon receipt of an authentication error.
     """
 
 
-class AuthenticationBlockedError(AuthenticationError):
-    """The identity provider blocked the authorization request."""
-
-
-class AuthenticationCertificateError(AuthenticationError):
-    """The identity provider certificate could not be retrieved."""
-
-
-class AuthenticationSigninError(AuthenticationError):
-    """The identity provider rejected the sign-in response."""
-
-
-class AuthenticationTokenExpiredError(AuthenticationError):
-    """The authentication token has expired."""
-
-
-class AuthenticationInvalidCredentialsError(AuthenticationSigninError):
-    """The supplied username or password was rejected."""
-
-
-class AuthenticationRedirectError(AuthenticationError):
-    """The sign-in flow returned an unexpected redirect."""
-
-
-class AuthenticationTokenExchangeError(AuthenticationError):
-    """The token exchange was unsuccessful."""
-
-
-class AuthenticationCciTokenExchangeError(AuthenticationTokenExchangeError):
-    """The CCI token exchange was unsuccessful."""
-
-
-class AuthenticationCcsTokenExchangeError(AuthenticationTokenExchangeError):
-    """The CCS token exchange was unsuccessful."""
-
-
-class AuthenticationOTPRequired(AuthenticationError):
-    """
-    Raised when OTP is required for authentication.
-    """
-
-
 class APIError(HyundaiKiaException):
     """
     Generic API error
-    """
-
-
-class DeviceIDError(APIError):
-    """
-    Raised upon receipt of an Invalid Device ID error.
     """
 
 

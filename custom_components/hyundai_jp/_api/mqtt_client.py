@@ -50,7 +50,6 @@ class MqttTransport:
             int,
             tuple[int, int, Callable[[], None] | None, Callable[[str], None] | None],
         ] = {}
-        self._reconnect_on_failure = False
         self._tls_context: ssl.SSLContext | None = None
         self._broker_host: str | None = None
         self._broker_port: int = 8883
@@ -58,22 +57,11 @@ class MqttTransport:
         self._broker_username: str | None = None
         self._broker_password: str | None = None
         self._connected: bool = False
-        self._subscribed_topics: list[str] = []
-        self._on_connection_change: Callable[[bool], None] | None = None
 
     @property
     def is_connected(self) -> bool:
         """Whether the MQTT client is connected to the broker."""
         return self._connected
-
-    @property
-    def subscribed_topics(self) -> list[str]:
-        """Snapshot of the currently subscribed topics."""
-        return list(self._subscribed_topics)
-
-    def set_on_connection_change(self, callback: Callable[[bool], None] | None) -> None:
-        """Register a callback for connection state changes (True/False)."""
-        self._on_connection_change = callback
 
     def configure(
         self,
@@ -83,7 +71,6 @@ class MqttTransport:
         broker_username: str | None = None,
         broker_password: str | None = None,
         *,
-        reconnect_on_failure: bool = False,
         tls_context: ssl.SSLContext | None = None,
     ) -> None:
         """Set broker connection parameters (call before connect()).
@@ -97,7 +84,6 @@ class MqttTransport:
         self._client_id = client_id or f"{DOMAIN}_{uuid.uuid4().hex[:12]}"
         self._broker_username = broker_username
         self._broker_password = broker_password
-        self._reconnect_on_failure = reconnect_on_failure
         self._tls_context = tls_context
 
     def connect(self) -> None:
@@ -110,7 +96,7 @@ class MqttTransport:
             client_id=self._client_id,
             protocol=mqtt.MQTTv311,
             clean_session=True,
-            reconnect_on_failure=self._reconnect_on_failure,
+            reconnect_on_failure=False,
         )
 
         if self._broker_username:
@@ -126,8 +112,6 @@ class MqttTransport:
 
         # App-confirmed client settings: connectionTimeout=10,
         # keepAliveInterval=15.
-        if self._reconnect_on_failure:
-            self._client.reconnect_delay_set(min_delay=1, max_delay=30)
         self._client.connect_timeout = 10
         # App-confirmed: MaxInflight=100 (the paho default is 10).
         self._client.max_inflight_messages_set(100)
@@ -161,12 +145,10 @@ class MqttTransport:
                     finally:
                         self._client = None
                         self._connected = False
-                        self._subscribed_topics = []
                         with self._subscription_lock:
                             self._pending_subscriptions.clear()
             self._client = None
         self._connected = False
-        self._subscribed_topics = []
         with self._subscription_lock:
             self._pending_subscriptions.clear()
 
@@ -206,7 +188,6 @@ class MqttTransport:
             elif failure:
                 failure("subscription rejected")
         _LOGGER.debug(f"{DOMAIN} - Push batch subscribe mid={mid}, rc={result}")
-        self._subscribed_topics = list(topics)
         return list(topics)
 
     # -- paho-mqtt callbacks (called on the background thread) --
@@ -226,8 +207,6 @@ class MqttTransport:
             self._connected = True
             if self._on_connect:
                 self._on_connect()
-            if self._on_connection_change:
-                self._on_connection_change(True)
         else:
             # paho re-raises callback exceptions on its network thread, so
             # a raise here kills the loop unseen — notify the glue's
@@ -235,8 +214,6 @@ class MqttTransport:
             _LOGGER.warning(f"{DOMAIN} - Push broker refused connection (rc={rc})")
             if self._on_disconnect:
                 self._on_disconnect(f"broker refused (rc={rc})")
-            if self._on_connection_change:
-                self._on_connection_change(False)
 
     def _on_mqtt_connect_fail(self, client: Any, userdata: Any, **kwargs: Any) -> None:
         """Handle a failed socket-level connect (DNS, reachability) — routed
@@ -246,8 +223,6 @@ class MqttTransport:
         )
         if self._on_disconnect:
             self._on_disconnect("connect failed (unreachable)")
-        if self._on_connection_change:
-            self._on_connection_change(False)
 
     def _on_mqtt_disconnect(
         self,
@@ -261,8 +236,6 @@ class MqttTransport:
         self._connected = False
         with self._subscription_lock:
             self._pending_subscriptions.clear()
-        if self._on_connection_change:
-            self._on_connection_change(False)
         rc = reason_code.value if not isinstance(reason_code, int) else reason_code
         reason = "clean disconnect" if rc == 0 else f"unexpected (rc={rc})"
         _LOGGER.warning(f"{DOMAIN} - Push DISCONNECTED: {reason}")

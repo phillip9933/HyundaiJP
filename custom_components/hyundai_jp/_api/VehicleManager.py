@@ -17,8 +17,6 @@ from .ApiImpl import (
 from .const import (
     CHARGE_PORT_ACTION,
     DOMAIN,
-    LAMP_MODE,
-    MQTT_PUSH_CONNECTION_STATE,
     ORDER_STATUS,
     VALET_MODE_ACTION,
     VEHICLE_LOCK_ACTION,
@@ -43,8 +41,6 @@ class VehicleManager:
         pin: str,
         geocode_api_enable: bool = False,
         geocode_api_use_email: bool = False,
-        geocode_provider: int = 1,
-        geocode_api_key: str | None = None,
         token: Token | None = None,
         language: str = "en",
     ):
@@ -54,10 +50,8 @@ class VehicleManager:
         self.password: str = password
         self.geocode_api_enable: bool = geocode_api_enable
         self.geocode_api_use_email: bool = geocode_api_use_email
-        self.geocode_provider: int = geocode_provider
         self.pin: str = pin
         self.language: str = language
-        self.geocode_api_key: str | None = geocode_api_key
 
         self.api: ApiImpl = self.get_implementation_by_region_brand(
             self.region, self.brand, self.language
@@ -142,15 +136,9 @@ class VehicleManager:
                     token=self.get_token(),
                     vehicle=vehicle,
                     use_email=self.geocode_api_use_email,
-                    provider=self.geocode_provider,
-                    API_KEY=self.geocode_api_key,
                 )
         else:
             _LOGGER.debug(f"{DOMAIN} - Vehicle Disabled, skipping.")
-
-    def check_and_force_update_vehicles(self, force_refresh_interval: int) -> None:
-        for vehicle_id in self.vehicles:
-            self.check_and_force_update_vehicle(force_refresh_interval, vehicle_id)
 
     def check_and_force_update_vehicle(
         self, force_refresh_interval: int, vehicle_id: str
@@ -171,10 +159,6 @@ class VehicleManager:
                 self.update_vehicle_with_cached_state(vehicle_id)
         else:
             self.update_vehicle_with_cached_state(vehicle_id)
-
-    def force_refresh_all_vehicles_states(self) -> None:
-        for vehicle_id in self.vehicles:
-            self.force_refresh_vehicle_state(vehicle_id)
 
     def force_refresh_vehicle_state(self, vehicle_id: str) -> None:
         vehicle = self.get_vehicle(vehicle_id)
@@ -226,7 +210,7 @@ class VehicleManager:
                 token_expired = True
             else:
                 token_expired = valid_until - grace_period <= now_utc
-        if token_expired or self.api.test_token(self.token) is False:
+        if token_expired:
             _LOGGER.debug(f"{DOMAIN} - Refresh token expired")
             result = self.api.refresh_access_token(self.token)
             if isinstance(result, Token):
@@ -238,7 +222,6 @@ class VehicleManager:
                     self.initialize_vehicles()
             else:
                 raise AuthenticationError("Japan refresh did not return a token")
-            self.api.refresh_vehicles(self.token, self.vehicles)
             return True
         if len(self.vehicles) == 0:
             self.initialize_vehicles()
@@ -253,26 +236,6 @@ class VehicleManager:
 
     def stop_climate(self, vehicle_id: str) -> str | None:
         return self.api.stop_climate(self.get_token(), self.get_vehicle(vehicle_id))
-
-    def start_pet_care(
-        self, vehicle_id: str, options: ClimateRequestOptions | None = None
-    ) -> str:
-        return self.api.start_pet_care(
-            self.get_token(), self.get_vehicle(vehicle_id), options
-        )
-
-    def stop_pet_care(self, vehicle_id: str) -> str:
-        return self.api.stop_pet_care(self.get_token(), self.get_vehicle(vehicle_id))
-
-    def start_battery_conditioning(self, vehicle_id: str) -> str:
-        return self.api.start_battery_conditioning(
-            self.get_token(), self.get_vehicle(vehicle_id)
-        )
-
-    def stop_battery_conditioning(self, vehicle_id: str) -> str:
-        return self.api.stop_battery_conditioning(
-            self.get_token(), self.get_vehicle(vehicle_id)
-        )
 
     def lock(self, vehicle_id: str) -> str | None:
         return self.api.lock_action(
@@ -300,29 +263,6 @@ class VehicleManager:
     def start_hazard_lights_and_horn(self, vehicle_id: str) -> str | None:
         return self.api.start_hazard_lights_and_horn(
             self.get_token(), self.get_vehicle(vehicle_id)
-        )
-
-    def door_power_off(self, vehicle_id: str) -> str:
-        return self.api.door_power_off(self.get_token(), self.get_vehicle(vehicle_id))
-
-    def open_frunk(self, vehicle_id: str) -> str:
-        return self.api.open_frunk(self.get_token(), self.get_vehicle(vehicle_id))
-
-    def turn_off_lamp(
-        self, vehicle_id: str, mode: LAMP_MODE = LAMP_MODE.ALL_OFF
-    ) -> str:
-        return self.api.turn_off_lamp(
-            self.get_token(), self.get_vehicle(vehicle_id), mode
-        )
-
-    def stop_rear_seat_alarm(self, vehicle_id: str) -> str:
-        return self.api.stop_rear_seat_alarm(
-            self.get_token(), self.get_vehicle(vehicle_id)
-        )
-
-    def set_charge_alarm(self, vehicle_id: str, enabled: bool) -> str:
-        return self.api.set_charge_alarm(
-            self.get_token(), self.get_vehicle(vehicle_id), enabled
         )
 
     def set_charge_limits(self, vehicle_id: str, ac: int, dc: int) -> str | None:
@@ -386,30 +326,6 @@ class VehicleManager:
             self.get_token(), self.get_vehicle(vehicle_id), CHARGE_PORT_ACTION.CLOSE
         )
 
-    def update_month_trip_info(self, vehicle_id: str, yyyymm_string: str) -> None:
-        """
-        feature only available for some regions.
-        Updates the vehicle.month_trip_info for the specified month.
-
-        Default this information is None:
-
-        month_trip_info: MonthTripInfo = None
-        """
-        vehicle = self.get_vehicle(vehicle_id)
-        self.api.update_month_trip_info(self.get_token(), vehicle, yyyymm_string)
-
-    def update_day_trip_info(self, vehicle_id: str, yyyymmdd_string: str) -> None:
-        """
-        feature only available for some regions.
-        Updates the vehicle.day_trip_info information for the specified day.
-
-        Default this information is None:
-
-        day_trip_info: DayTripInfo = None
-        """
-        vehicle = self.get_vehicle(vehicle_id)
-        self.api.update_day_trip_info(self.get_token(), vehicle, yyyymmdd_string)
-
     def disable_vehicle(self, vehicle_id: str) -> None:
         self.get_vehicle(vehicle_id).enabled = False
 
@@ -445,11 +361,6 @@ class VehicleManager:
             self.get_token(), self.get_vehicle(vehicle_id), limit
         )
 
-    def start_ota_update(self, vehicle_id: str, start: bool) -> dict[str, Any]:
-        return self.api.start_ota_update(
-            self.get_token(), self.get_vehicle(vehicle_id), start
-        )
-
     def set_navigation(self, vehicle_id: str, poi_list: list[POIInfo]) -> str:
         return self.api.set_navigation(
             self.get_token(), self.get_vehicle(vehicle_id), poi_list
@@ -467,7 +378,6 @@ class VehicleManager:
                 token_fn=lambda: self.get_token(),
                 refresh_fn=self.check_and_refresh_token,
                 get_vehicle=self.get_vehicle,
-                vehicles=lambda: self.vehicles,
                 after_close_fn=lambda: self.api.close(),
             )
             self._push_session.set_status_callback(self._push_status_callback)
@@ -532,10 +442,6 @@ class VehicleManager:
         self._push_connection_change_callback = callback
         if self._push_session is not None:
             self._push_session.set_connection_change_callback(callback)
-
-    def get_push_connection_state(self) -> MQTT_PUSH_CONNECTION_STATE | None:
-        """Push connection state through the region API (delegator)."""
-        return self.api.get_push_connection_state(self.get_token())
 
     @staticmethod
     def get_implementation_by_region_brand(

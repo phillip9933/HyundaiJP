@@ -40,7 +40,13 @@ def test_japan_identity_survives_round_trip_without_discarded_auth_fields():
         "non_ccs_refresh_token",
         "id_token",
         "user_id",
+        "stamp",
     }
     assert not serialized.keys() & discarded
     # Historical dictionaries may carry other-region keys; no migration leaks them.
-    assert Token.from_dict({**serialized, "cci_access_token": "ignored"}) == token
+    assert (
+        Token.from_dict(
+            {**serialized, "cci_access_token": "ignored", "stamp": "ignored"}
+        )
+        == token
+    )

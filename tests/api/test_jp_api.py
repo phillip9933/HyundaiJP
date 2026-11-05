@@ -9,7 +9,6 @@ from unittest.mock import Mock, PropertyMock
 import pytest
 import requests
 
-from custom_components.hyundai_jp._api.ApiImplType1 import ApiImplType1
 from custom_components.hyundai_jp._api.const import ORDER_STATUS
 from custom_components.hyundai_jp._api.exceptions import (
     APIError,
@@ -52,21 +51,6 @@ def test_factory_and_capabilities():
     for brand in (1, 3):
         with pytest.raises(APIError):
             VehicleManager.get_implementation_by_region_brand(10, brand, "en")
-
-
-@pytest.mark.parametrize(
-    "method,date",
-    [("update_month_trip_info", "202610"), ("update_day_trip_info", "20261013")],
-)
-def test_unverified_type1_trip_calls_are_rejected_without_network(api, method, date):
-    assert isinstance(api, ApiImplType1)
-    with pytest.raises(NotImplementedError, match="Japan.*trip information"):
-        getattr(api, method)(
-            Token(username="synthetic", password="synthetic"),
-            Vehicle(id="synthetic"),
-            date,
-        )
-    assert api.session.mock_calls == []
 
 
 @pytest.mark.parametrize(
@@ -1303,7 +1287,7 @@ def test_japan_populates_type1_urls_and_native_keystream():
     assert api.LANGUAGE == "ja"
 
 
-def test_shared_push_contract_delegates_to_authenticated_vehicle_provider(api):
+def test_push_provider_lookup_reuses_the_authenticated_vehicle_session(api):
     token = Token(
         username="synthetic",
         password="synthetic",
@@ -1318,59 +1302,27 @@ def test_shared_push_contract_delegates_to_authenticated_vehicle_provider(api):
     helper.request_context = {"clientId": token.mqtt_client_id}
     api._mqtt_sessions[vehicle.id] = (identity, helper)
     assert api.get_push_provider(token, vehicle) is helper
-    for method in (
-        "get_push_broker_info",
-        "register_push_client",
-        "get_push_connection_state",
-        "get_push_credentials",
-    ):
-        assert getattr(api, method)(token) is getattr(helper, method).return_value
-        getattr(helper, method).assert_called_once_with(token)
-    for method in (
-        "register_push_vehicle",
-        "get_push_vehicle_identity",
-        "get_push_topics",
-    ):
-        assert (
-            getattr(api, method)(token, vehicle) is getattr(helper, method).return_value
-        )
-        getattr(helper, method).assert_called_once_with(token, vehicle)
-    api.session.request.assert_not_called()
-
-
-def test_account_push_delegates_use_broker_client_identity_for_fleets(api):
-    token = Token(
-        username="synthetic",
-        password="synthetic",
-        access_token="access",
-        device_id="phone",
-        mqtt_registration_uuid="registration",
-        mqtt_client_id="broker-client",
-    )
-    identity = (token.access_token, token.device_id, token.mqtt_registration_uuid)
-    old = Mock(closed=False)
-    old.request_context = {"clientId": "old-client"}
-    current = Mock(closed=False)
-    current.request_context = {"clientId": "broker-client"}
-    api._mqtt_sessions = {"one": (identity, old), "two": (identity, current)}
-    assert (
-        api.get_push_connection_state(token)
-        is current.get_push_connection_state.return_value
-    )
-    current.get_push_connection_state.assert_called_once_with(token)
-    old.get_push_connection_state.assert_not_called()
-    token.mqtt_client_id = None
-    with pytest.raises(InvalidAPIResponseError, match="Select a Japan vehicle"):
-        api.get_push_connection_state(token)
     api.session.request.assert_not_called()
 
 
 def test_japan_push_parser_uses_shared_status_and_result_schema(api):
-    status = api.parse_push_message("service/phone/_/vss/synthetic", b'{"state": {}}')
+    provider = api.get_push_provider(
+        Token(
+            username="synthetic",
+            password="synthetic",
+            access_token="Bearer synthetic-access",
+            device_id="synthetic-phone",
+            mqtt_registration_uuid="synthetic-registration",
+        ),
+        Vehicle(id="synthetic"),
+    )
+    status = provider.parse_push_message(
+        "service/phone/_/vss/synthetic", b'{"state": {}}'
+    )
     assert status is not None and status.is_status
-    result = api.parse_push_message("service/phone/_/res/client", b'{"state": {}}')
+    result = provider.parse_push_message("service/phone/_/res/client", b'{"state": {}}')
     assert result is not None and not result.is_status
-    assert api.parse_push_message("service/phone/_/vss/synthetic", b"[]") is None
+    assert provider.parse_push_message("service/phone/_/vss/synthetic", b"[]") is None
     api.session.request.assert_not_called()
 
 
@@ -1541,29 +1493,4 @@ def test_refresh_authentication_diagnostics_do_not_copy_exception_text(
         "failure": "authentication",
     }
     assert secret not in repr(api.get_local_diagnostics())
-    api.session.request.assert_not_called()
-
-
-@pytest.mark.parametrize("closed", [False, True])
-def test_push_connection_state_before_setup_or_after_close_is_unknown_without_requests(
-    api, closed
-):
-    token = Token(username="synthetic", password="synthetic")
-    if closed:
-        api.close()
-    assert api.get_push_connection_state(token) is None
-    assert api._mqtt_sessions == {}
-    api.session.request.assert_not_called()
-
-
-def test_push_connection_state_does_not_hide_an_initialized_provider_error(api):
-    token = Token(username="synthetic", password="synthetic")
-    provider = Mock(closed=False)
-    provider.get_push_connection_state.side_effect = InvalidAPIResponseError(
-        "synthetic"
-    )
-    api._mqtt_sessions["synthetic"] = ((None, None, None), provider)
-    with pytest.raises(InvalidAPIResponseError):
-        api.get_push_connection_state(token)
-    provider.get_push_connection_state.assert_called_once_with(token)
     api.session.request.assert_not_called()

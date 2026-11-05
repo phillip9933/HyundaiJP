@@ -4,7 +4,7 @@ import base64
 from collections.abc import Sequence
 import datetime as dt
 import logging
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from .ApiImpl import ApiImpl, ApiImplSession
 from .const import (
@@ -72,25 +72,17 @@ class ApiImplType1(ApiImpl):
             )
             return None
 
-    def _get_authenticated_headers(
-        self, token: Token, ccs2_support: int | None = None
-    ) -> dict[str, Any]:
-        raise NotImplementedError("Japan adapter must implement this hook")
+    if TYPE_CHECKING:
 
-    def _control_token_for_vehicle(
-        self, token: Token, vehicle: Vehicle | None
-    ) -> tuple[str, float]:
-        return self._get_control_token(token)
+        def _control_token_for_vehicle(
+            self, token: Token, vehicle: Vehicle | None
+        ) -> tuple[str, float]: ...
 
-    def _control_authenticated_headers(
-        self, token: Token, vehicle: Vehicle | None
-    ) -> dict[str, Any]:
-        return self._get_authenticated_headers(
-            token, vehicle.ccu_ccs2_protocol_support if vehicle is not None else None
-        )
+        def _control_authenticated_headers(
+            self, token: Token, vehicle: Vehicle | None
+        ) -> dict[str, Any]: ...
 
-    def _control_token_headers(self, control_token: str) -> dict[str, str]:
-        return {"Authorization": control_token, "AuthorizationCCSP": control_token}
+        def _control_token_headers(self, control_token: str) -> dict[str, str]: ...
 
     def _get_control_headers(
         self, token: Token, vehicle: Vehicle | None = None
@@ -1219,9 +1211,6 @@ class ApiImplType1(ApiImpl):
         token.control_token = control_token
         token.control_token_expiry = expiry
         return control_token, expiry
-
-    def _get_control_token(self, token: Token) -> tuple[str, float]:
-        return self._get_control_grant(token)
 
     def _stamp_for_epoch(self, epoch: int) -> str:
         raw_data = f"{self.APP_ID}:{epoch}".encode()

@@ -1,21 +1,9 @@
 """const.py"""
 
-import datetime
 from enum import Enum, IntEnum
 
 DOMAIN: str = "hyundai_jp"
 
-BRAND_HYUNDAI = "Hyundai"
-BRANDS = {2: BRAND_HYUNDAI}
-
-GOOGLE = "google"
-OPENSTREETMAP = "openstreetmap"
-GEO_LOCATION_PROVIDERS = {1: OPENSTREETMAP, 2: GOOGLE}
-
-REGION_JAPAN = "Japan"
-REGIONS = {10: REGION_JAPAN}
-
-LOGIN_TOKEN_LIFETIME = datetime.timedelta(hours=23)
 
 LENGTH_KILOMETERS = "km"
 LENGTH_MILES = "mi"
@@ -116,10 +104,6 @@ class CHARGE_PORT_ACTION(Enum):
     OPEN = "open"
 
 
-class LAMP_MODE(Enum):
-    ALL_OFF = "all-off"
-
-
 class ORDER_STATUS(Enum):
     # Service accepted the request; physical vehicle execution is unconfirmed.
     ACCEPTED = "ACCEPTED"
@@ -162,19 +146,6 @@ class VALET_MODE_ACTION(Enum):
     DEACTIVATE = "deactivate"
 
 
-class OTP_NOTIFY_TYPE(Enum):
-    EMAIL = "EMAIL"
-    SMS = "SMS"
-
-
 # Push reconnect backoff timing (capped exponential; overridable in tests).
 MQTT_PUSH_RECONNECT_INITIAL_DELAY: float = 5.0
 MQTT_PUSH_RECONNECT_MAX_DELAY: float = 300.0
-
-
-class MQTT_PUSH_CONNECTION_STATE(str, Enum):
-    """Push broker connection state (push contract wire values)."""
-
-    ONLINE = "ONLINE"
-    OFFLINE = "OFFLINE"
-    UNKNOWN = "UNKNOWN"

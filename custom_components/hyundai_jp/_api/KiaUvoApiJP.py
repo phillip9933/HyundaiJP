@@ -20,7 +20,7 @@ import requests
 
 from .ApiImpl import PushProvider
 from .ApiImplType1 import ApiImplType1
-from .const import ENGINE_TYPES, MQTT_PUSH_CONNECTION_STATE, ORDER_STATUS, SEAT_STATUS
+from .const import ENGINE_TYPES, ORDER_STATUS, SEAT_STATUS
 from .exceptions import (
     APIError,
     AuthenticationError,
@@ -35,7 +35,6 @@ from .exceptions import (
 from .japan_commands import JapanCommandsMixin
 from .japan_mqtt import JapanMqttSession, JapanMqttTransportPool
 from .japan_svm import JapanSVM
-from .mqtt_service_hub import PushMessage, parse_service_hub_status_message
 from .Token import Token
 from .utils import get_child_value, parse_datetime
 from .Vehicle import DailyDrivingStats, Vehicle
@@ -151,66 +150,6 @@ class KiaUvoApiJP(JapanCommandsMixin, JapanSVM, ApiImplType1):
 
     def get_push_provider(self, token: Token, vehicle: Vehicle) -> PushProvider:
         return self._mqtt_for_vehicle(token, vehicle)
-
-    def _authenticated_push_provider(self, token: Token) -> JapanMqttSession:
-        """Resolve account calls by registered client ID after scoped setup."""
-        identity = (token.access_token, token.device_id, token.mqtt_registration_uuid)
-        with self._mqtt_sessions_lock:
-            sessions = list(self._mqtt_sessions.values())
-        matches = [
-            helper
-            for saved, helper in sessions
-            if saved == identity and helper.closed is not True
-        ]
-        if len(matches) == 1:
-            return matches[0]
-        if token.mqtt_client_id:
-            for helper in matches:
-                if helper.request_context.get("clientId") == token.mqtt_client_id:
-                    return helper
-        raise InvalidAPIResponseError("Select a Japan vehicle's push provider first")
-
-    def get_push_broker_info(self, token: Token) -> dict[str, Any] | None:
-        return self._authenticated_push_provider(token).get_push_broker_info(token)
-
-    def register_push_client(self, token: Token) -> dict[str, Any] | None:
-        return self._authenticated_push_provider(token).register_push_client(token)
-
-    def register_push_vehicle(
-        self, token: Token, vehicle: Vehicle
-    ) -> dict[str, Any] | None:
-        return self._mqtt_for_vehicle(token, vehicle).register_push_vehicle(
-            token, vehicle
-        )
-
-    def get_push_vehicle_identity(
-        self, token: Token, vehicle: Vehicle
-    ) -> dict[str, Any] | None:
-        return self._mqtt_for_vehicle(token, vehicle).get_push_vehicle_identity(
-            token, vehicle
-        )
-
-    def get_push_connection_state(
-        self, token: Token
-    ) -> MQTT_PUSH_CONNECTION_STATE | None:
-        identity = (token.access_token, token.device_id, token.mqtt_registration_uuid)
-        with self._mqtt_sessions_lock:
-            if not any(
-                saved == identity and helper.closed is not True
-                for saved, helper in self._mqtt_sessions.values()
-            ):
-                return None
-            provider = self._authenticated_push_provider(token)
-        return provider.get_push_connection_state(token)
-
-    def get_push_topics(self, token: Token, vehicle: Vehicle) -> list[str]:
-        return self._mqtt_for_vehicle(token, vehicle).get_push_topics(token, vehicle)
-
-    def get_push_credentials(self, token: Token) -> tuple[str, str] | None:
-        return self._authenticated_push_provider(token).get_push_credentials(token)
-
-    def parse_push_message(self, topic: str, payload: bytes) -> PushMessage | None:
-        return parse_service_hub_status_message(topic, payload, include_result=True)
 
     @staticmethod
     def _ccs2_observation_time(value: object) -> dt.datetime:
@@ -523,16 +462,6 @@ class KiaUvoApiJP(JapanCommandsMixin, JapanSVM, ApiImplType1):
         finally:
             helper.retire(action_id)
 
-    def update_month_trip_info(
-        self, token: Token, vehicle: Vehicle, yyyymm_string: str
-    ) -> None:
-        raise NotImplementedError("Japan month trip information is not implemented")
-
-    def update_day_trip_info(
-        self, token: Token, vehicle: Vehicle, yyyymmdd_string: str
-    ) -> None:
-        raise NotImplementedError("Japan day trip information is not implemented")
-
     def initialize_vehicle_capabilities(self, vehicle: Vehicle) -> None:
         """Japan options describe each vehicle rather than the entire region."""
         service = self._vehicle_profiles.get(vehicle.id, {}).get("serviceOption", {})
@@ -647,17 +576,6 @@ class KiaUvoApiJP(JapanCommandsMixin, JapanSVM, ApiImplType1):
                 ):
                     headers[key] = value
         return headers
-
-    def _get_authenticated_headers(
-        self, token: Token, ccs2_support: int | None = None
-    ) -> dict[str, Any]:
-        headers = self._headers(token)
-        if ccs2_support is not None:
-            headers["ccuCCS2ProtocolSupport"] = str(ccs2_support)
-        return headers
-
-    def _get_vehicle_headers(self, token: Token, vehicle: Vehicle) -> dict[str, Any]:
-        return self._vehicle_headers(token, vehicle)
 
     _KNOWN_ERRORS: ClassVar[dict[str, tuple[type[Exception], str]]] = {
         "4002": (APIError, "invalid request"),

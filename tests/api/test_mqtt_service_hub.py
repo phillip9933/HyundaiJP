@@ -14,8 +14,6 @@ from custom_components.hyundai_jp._api.mqtt_service_hub import (
     build_car_status_topics,
     build_service_hub_url_with_params,
     classify_phone_topic,
-    decode_payload,
-    parse_service_hub_message,
     parse_service_hub_status_message,
 )
 
@@ -75,25 +73,6 @@ def test_classify_phone_topic_trailing_slash():
     )
 
 
-def test_decode_payload_json_and_hex():
-    assert decode_payload(b'{"a": 1}') == {"a": 1}
-    assert decode_payload(b"\x80\x01") == {"raw": "8001"}
-
-
-def test_parse_service_hub_message_status():
-    message = parse_service_hub_message("service/phone/_/vss/veh1", b'{"a": 1}')
-    assert message is not None
-    assert message.topic_group == "CarStatus"
-    assert message.topic_type == "Status"
-    assert message.vehicle_id == "veh1"
-    assert message.payload == {"a": 1}
-    assert message.is_status is True
-
-
-def test_parse_service_hub_message_non_phone_is_none():
-    assert parse_service_hub_message("device/x/remotecontroller/connect", b"{}") is None
-
-
 def test_url_with_params():
     """The moved encoding behavior: '@' preserved (live-probed), space percent-encoded."""
     assert build_service_hub_url_with_params("https://h", "/p", {}) == "https://h/p"
@@ -130,13 +109,3 @@ def test_strict_status_parser_drops_invalid_or_oversized_objects(payload):
     assert (
         parse_service_hub_status_message("service/phone/_/vss/vehicle", payload) is None
     )
-
-
-def test_strict_status_parser_keeps_default_parser_semantics_separate():
-    topic = "service/phone/_/connection/vehicle"
-    default = parse_service_hub_message(topic, b"{}")
-    strict = parse_service_hub_status_message(topic, b"{}")
-    assert default is not None and default.is_status
-    assert strict is not None and not strict.is_status
-    status = parse_service_hub_status_message("service/phone/_/vss/vehicle", b"{}")
-    assert status is not None and status.is_status

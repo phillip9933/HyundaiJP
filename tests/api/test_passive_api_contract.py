@@ -16,7 +16,8 @@ def test_base_interfaces_have_passive_defaults_without_network(api):
     api.session = Mock()
     before = Vehicle(id="synthetic")
     token = Token(username="synthetic", password="synthetic")
-    assert api.get_push_provider(token, before) is api
+    with pytest.raises(NotImplementedError):
+        api.get_push_provider(token, before)
     assert api.supported_commands is None
     assert api.get_local_diagnostics() == {}
     assert api.apply_cached_mqtt_state(before) is False

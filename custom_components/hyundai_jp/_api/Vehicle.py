@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 import datetime
 import logging
 from typing import Any
-import warnings
 
 from .const import (
     CONNECTOR_FASTENING_STATE,
@@ -16,50 +15,6 @@ from .const import (
 from .utils import float_or_none, get_float, get_safe_local_datetime
 
 _LOGGER = logging.getLogger(__name__)
-
-
-@dataclass
-class TripInfo:
-    """Trip Info"""
-
-    hhmmss: str | None = None  # will not be filled by summary
-    drive_time: int | None = None  # minutes
-    idle_time: int | None = None  # minutes
-    distance: float | None = None
-    avg_speed: float | None = None
-    max_speed: int | None = None
-    end_hhmmss: str | None = None  # trip end time; only where the API reports it
-    # Driving-behaviour counters from trip detail (IN). The API names them
-    # trip*Time; treated as event counts. None where not reported.
-    hard_braking_count: int | None = None
-    rapid_acceleration_count: int | None = None
-    excessive_speed_count: int | None = None
-
-
-@dataclass
-class DayTripCounts:
-    """Day trip counts"""
-
-    yyyymmdd: str | None = None
-    trip_count: int | None = None
-
-
-@dataclass
-class MonthTripInfo:
-    """Month Trip Info"""
-
-    yyyymm: str | None = None
-    summary: TripInfo | None = None
-    day_list: list[DayTripCounts] = field(default_factory=list)
-
-
-@dataclass
-class DayTripInfo:
-    """Day Trip Info"""
-
-    yyyymmdd: str | None = None
-    summary: TripInfo | None = None
-    trip_list: list[TripInfo] = field(default_factory=list)
 
 
 @dataclass
@@ -99,21 +54,6 @@ class VehicleSupports:
     ota_progress: bool | None = None
     # vehicle.ota.scheduleupdate protocol
     schedule_update: bool | None = None
-
-
-def _deprecated_supports_alias(alias: str, item: str) -> property:
-    """Map a legacy flat ``vehicle.<alias>`` attribute onto ``vehicle.supports``."""
-    message = f"Vehicle.{alias} is deprecated; use Vehicle.supports.{item} instead"
-
-    def getter(self: Vehicle) -> Any:
-        warnings.warn(message, DeprecationWarning, stacklevel=2)
-        return getattr(self.supports, item)
-
-    def setter(self: Vehicle, value: Any) -> None:
-        warnings.warn(message, DeprecationWarning, stacklevel=2)
-        setattr(self.supports, item, value)
-
-    return property(getter, setter, doc=f"Deprecated alias for supports.{item}.")
 
 
 @dataclass
@@ -296,7 +236,6 @@ class Vehicle:
     # expressed in watt-hours (Wh)
     power_consumption_30d: float | None = None  # Europe feature only
 
-    # feature only available for some regions (getter/setter for sorting)
     _daily_stats: list[DailyDrivingStats] = field(default_factory=list)
 
     # Other statuses from KiaCA logs
@@ -348,15 +287,6 @@ class Vehicle:
     air_cleaning_is_on: bool | None = None
     steering_wheel_heat_step: int | None = None
 
-    # Deprecated flat aliases; use vehicle.supports.<item>.
-    supports_window_control = _deprecated_supports_alias(
-        "supports_window_control", "window_control"
-    )
-    supports_valet_mode = _deprecated_supports_alias(
-        "supports_valet_mode", "valet_mode"
-    )
-    supports_svm = _deprecated_supports_alias("supports_svm", "svm")
-
     @property
     def daily_stats(self) -> list[DailyDrivingStats]:
         return self._daily_stats
@@ -369,46 +299,6 @@ class Vehicle:
             result.sort(reverse=True, key=lambda k: k.date)
             _LOGGER.debug(f"after  daily_stats: {result}")
         self._daily_stats = result
-
-    # feature only available for some regions (getter/setter for sorting)
-    _month_trip_info: MonthTripInfo | None = None
-
-    @property
-    def month_trip_info(self) -> MonthTripInfo | None:
-        return self._month_trip_info
-
-    @month_trip_info.setter
-    def month_trip_info(self, value: Any) -> None:
-        result = value
-        if (
-            result is not None
-            and hasattr(result, "day_list")
-            and len(result.day_list) > 0
-        ):  # sort on increasing yyyymmdd
-            _LOGGER.debug(f"before month_trip_info: {result}")
-            result.day_list.sort(key=lambda k: k.yyyymmdd)
-            _LOGGER.debug(f"after  month_trip_info: {result}")
-        self._month_trip_info = result
-
-    # feature only available for some regions (getter/setter for sorting)
-    _day_trip_info: DayTripInfo | None = None
-
-    @property
-    def day_trip_info(self) -> DayTripInfo | None:
-        return self._day_trip_info
-
-    @day_trip_info.setter
-    def day_trip_info(self, value: Any) -> None:
-        result = value
-        if (
-            result is not None
-            and hasattr(result, "trip_list")
-            and len(result.trip_list) > 0
-        ):  # sort on descending hhmmss
-            _LOGGER.debug(f"before day_trip_info: {result}")
-            result.trip_list.sort(reverse=True, key=lambda k: k.hhmmss)
-            _LOGGER.debug(f"after day_trip_info: {result}")
-        self._day_trip_info = result
 
     ev_battery_percentage: int | None = None
     ev_battery_pack_voltage: int | None = None

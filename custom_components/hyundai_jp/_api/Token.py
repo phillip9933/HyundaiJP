@@ -16,7 +16,6 @@ class Token:
     device_id: str | None = None
     # Access Token expiry:
     valid_until: dt.datetime = dt.datetime.min
-    stamp: str | None = None
     pin: str | None = None
     # Japan PIN verification grant, cached with its precise expiry:
     control_token: str | None = None
@@ -50,7 +49,6 @@ class Token:
             refresh_token=data.get("refresh_token"),
             device_id=data.get("device_id"),
             valid_until=valid_until,
-            stamp=data.get("stamp"),
             pin=data.get("pin"),
             control_token=data.get("control_token"),
             control_token_expiry=data.get("control_token_expiry", 0),

@@ -128,33 +128,27 @@ def test_connack_refusal_notifies_instead_of_raising():
     """Refusal on the paho thread must not raise: paho re-raises callback
     exceptions on its network loop, killing the thread before any glue
     sees it (live-probed on paho 2.1.0). Surface via on_disconnect +
-    connection-change instead."""
+    on_disconnect instead."""
 
     class _Reason:
         value = 135
 
     refused: list[str] = []
-    changes: list[bool] = []
     t = MqttTransport(
         on_disconnect=lambda reason: refused.append(reason),
         on_connect=lambda: refused.append("connected"),  # must NOT fire
     )
-    t.set_on_connection_change(lambda up: changes.append(up))
     t._on_mqtt_connect(None, None, None, _Reason())
     assert refused == ["broker refused (rc=135)"]
-    assert changes == [False]
     assert t.is_connected is False
 
 
 def test_connect_fail_routes_to_disconnect_callback():
     """A failed socket connect (DNS/TLS) goes through the same glue path."""
     refused: list[str] = []
-    changes: list[bool] = []
     t = MqttTransport(on_disconnect=lambda reason: refused.append(reason))
-    t.set_on_connection_change(lambda up: changes.append(up))
     t._on_mqtt_connect_fail(None, None)
     assert refused == ["connect failed (unreachable)"]
-    assert changes == [False]
 
 
 def test_connect_without_configure_raises():
@@ -198,7 +192,6 @@ def test_disconnect_stops_loop_and_clears_state():
         loop_stop=lambda: stops.append(1), disconnect=lambda: disconnects.append(1)
     )
     t._connected = True
-    t._subscribed_topics = ["t1"]
     t.disconnect()
     assert stops == [1]
     assert disconnects == [1]
@@ -207,7 +200,6 @@ def test_disconnect_stops_loop_and_clears_state():
     # idempotent without a client
     t.disconnect()
     assert t.is_connected is False
-    assert t.subscribed_topics == []
 
 
 def test_subscribe_requires_connected_client():
@@ -220,28 +212,24 @@ def test_subscribe_requires_connected_client():
 
 
 def test_connack_success_fires_connection_callbacks():
-    connected_calls, changes = [], []
+    connected_calls = []
     t = MqttTransport(on_connect=lambda: connected_calls.append(1))
-    t.set_on_connection_change(lambda up: changes.append(up))
     t._on_mqtt_connect(None, None, None, 0)  # int reason code
     assert connected_calls == [1]
-    assert changes == [True]
     assert t.is_connected is True
 
 
 def test_disconnect_callback_routes_reason():
-    refused, changes = [], []
+    refused = []
 
     class _Reason:
         value = 7
 
     t = MqttTransport(on_disconnect=lambda r: refused.append(r))
-    t.set_on_connection_change(lambda up: changes.append(up))
     t._on_mqtt_disconnect(None, None, None, 0)
     assert refused == ["clean disconnect"]
     t._on_mqtt_disconnect(None, None, None, _Reason())
     assert refused[-1] == "unexpected (rc=7)"
-    assert changes == [False, False]
     assert t.is_connected is False
 
 

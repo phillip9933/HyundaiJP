@@ -10,7 +10,7 @@ class DummyApi(ApiImpl):
         super().__init__()
         self.login_calls = 0
 
-    def login(self, username, password, token=None, otp_handler=None, pin=None):
+    def login(self, username, password, pin=None):
         self.login_calls += 1
         return Token(
             username=username,
@@ -20,9 +20,6 @@ class DummyApi(ApiImpl):
 
     def get_vehicles(self, token):
         return []
-
-    def refresh_vehicles(self, token, vehicles):
-        return vehicles
 
 
 def test_check_and_refresh_token_handles_min_datetime(monkeypatch):
@@ -47,7 +44,7 @@ def test_check_and_refresh_token_handles_min_datetime(monkeypatch):
     assert dummy_api.login_calls == 1
 
 
-def test_login_returns_false_without_token_or_otp(monkeypatch):
+def test_login_returns_false_without_token(monkeypatch):
     dummy_api = DummyApi()
     monkeypatch.setattr(dummy_api, "login", lambda **kwargs: None)
     monkeypatch.setattr(

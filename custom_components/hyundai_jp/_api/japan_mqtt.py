@@ -110,7 +110,6 @@ class _JapanConnection:
             client_id,
             credentials[0],
             credentials[1],
-            reconnect_on_failure=False,
             tls_context=ssl.create_default_context(),
         )
 
@@ -166,8 +165,6 @@ class JapanMqttSession(ServiceHubProviderMixin):
     MAX_RESULTS = 64
     MAX_STATE_UPDATES = 64
     MAX_MESSAGE_BYTES = 2 * 1024 * 1024
-    SERVICE_HUB_IDENTITY_FROM_METADATA = True
-    SERVICE_HUB_METADATA_OPTIONAL = True
 
     def __init__(
         self,
@@ -197,7 +194,6 @@ class JapanMqttSession(ServiceHubProviderMixin):
         self._vehicle_id = vehicle_id
         self._vehicle = vehicle if vehicle is not None else Vehicle(id=vehicle_id)
         self._service_hub_tid: str | None = None
-        self._service_hub_session: requests.Session | None = None
         self._registered_client_id: str | None = None
         self._registration_uuid = registration_uuid
         self._headers_factory = headers_factory

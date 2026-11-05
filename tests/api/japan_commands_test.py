@@ -30,7 +30,6 @@ from custom_components.hyundai_jp._api.const import (
 )
 from custom_components.hyundai_jp._api.exceptions import (
     AuthenticationError,
-    DeviceIDError,
     InvalidAPIResponseError,
     RequestTimeoutError,
     UnsupportedControlError,
@@ -809,7 +808,7 @@ def test_flat_schedule_validates_both_envelopes_before_either_write(missing):
 
 
 @pytest.mark.parametrize(
-    "failure", [DeviceIDError("synthetic"), RequestTimeoutError("synthetic")]
+    "failure", [InvalidAPIResponseError("synthetic"), RequestTimeoutError("synthetic")]
 )
 @pytest.mark.parametrize(
     "method,args",
@@ -899,7 +898,7 @@ def test_shared_header_orchestration_retains_japan_cached_grant_policy(monkeypat
     api._request.assert_not_called()
     token.pin = " "
     with pytest.raises(AuthenticationError):
-        api._get_control_token(token)
+        api._get_control_grant(token)
     api._request.assert_not_called()
 
 
@@ -911,7 +910,7 @@ def test_shared_grant_cache_keeps_japan_fractional_ttl(monkeypatch):
     api._request.side_effect = [{"controlToken": "new-control", "expiresTime": 0.5}]
     assert api._control_headers(token, vehicle)["Authorization"] == "Bearer new-control"
     assert token.control_token_expiry == 100.75
-    assert api._get_control_token(token) == ("Bearer new-control", 100.75)
+    assert api._get_control_grant(token) == ("Bearer new-control", 100.75)
     assert api._request.call_count == 1
 
 

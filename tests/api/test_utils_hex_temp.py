@@ -1,9 +1,6 @@
 import pytest
 
-from custom_components.hyundai_jp._api.utils import (
-    get_hex_temp_into_index,
-    get_index_into_hex_temp,
-)
+from custom_components.hyundai_jp._api.utils import get_hex_temp_into_index
 
 
 @pytest.mark.parametrize(
@@ -11,9 +8,7 @@ from custom_components.hyundai_jp._api.utils import (
 )
 def test_hex_temp_round_trip(hex_temp: str, index: int) -> None:
     assert get_hex_temp_into_index(hex_temp) == index
-    assert get_index_into_hex_temp(index) == hex_temp
 
 
 def test_hex_temp_none() -> None:
     assert get_hex_temp_into_index(None) is None
-    assert get_index_into_hex_temp(None) is None

@@ -64,9 +64,6 @@ def test_default_transport_disables_reconnect_and_preserves_tls_and_qos_zero(cli
         "synthetic/b",
     ]
     instance.subscribe.assert_called_once_with([("synthetic/a", 0), ("synthetic/b", 0)])
-    snapshot = transport.subscribed_topics
-    snapshot.clear()
-    assert transport.subscribed_topics == ["synthetic/a", "synthetic/b"]
     assert transport.is_connected
 
 
@@ -191,7 +188,7 @@ def test_default_message_callback_and_optional_metadata_preserve_delivery(client
     assert transport.is_connected
 
 
-def test_opt_in_tls_context_and_reconnect_policy_do_not_change_defaults(client):
+def test_explicit_tls_context_keeps_implicit_reconnect_disabled(client):
     instance, factory = client
     context = ssl.create_default_context()
     transport = MqttTransport()
@@ -200,11 +197,10 @@ def test_opt_in_tls_context_and_reconnect_policy_do_not_change_defaults(client):
         client_id="synthetic-client",
         broker_username="synthetic-user",
         broker_password="synthetic-password",
-        reconnect_on_failure=True,
         tls_context=context,
     )
     transport.connect()
-    assert factory.call_args.kwargs["reconnect_on_failure"] is True
+    assert factory.call_args.kwargs["reconnect_on_failure"] is False
     instance.tls_set_context.assert_called_once_with(context)
     instance.tls_set.assert_not_called()
     instance.tls_insecure_set.assert_not_called()
@@ -212,7 +208,7 @@ def test_opt_in_tls_context_and_reconnect_policy_do_not_change_defaults(client):
         "synthetic-user", "synthetic-password"
     )
 
-    instance.reconnect_delay_set.assert_called_once_with(min_delay=1, max_delay=30)
+    instance.reconnect_delay_set.assert_not_called()
 
 
 def test_loop_start_failure_is_reported_only_to_opt_in_callback(client):
@@ -237,7 +233,6 @@ def test_disconnect_order_and_pending_confirmation_cleanup(client, stop_loop_fir
         ["loop_stop", "disconnect"] if stop_loop_first else ["disconnect", "loop_stop"]
     )
     assert not transport.is_connected
-    assert transport.subscribed_topics == []
     suback(client, [1])
     success.assert_not_called()
     transport.disconnect(stop_loop_first=stop_loop_first)
@@ -254,7 +249,6 @@ def test_opt_in_disconnect_still_stops_loop_and_clears_state_on_disconnect_error
         transport.disconnect(stop_loop_first=False)
     instance.loop_stop.assert_called_once()
     assert not transport.is_connected
-    assert transport.subscribed_topics == []
     transport.disconnect(stop_loop_first=False)
     instance.disconnect.assert_called_once()
 

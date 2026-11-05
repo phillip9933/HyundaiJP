@@ -1,4 +1,4 @@
-"""Terminal shutdown cannot be undone by blocked push registration or reconnect."""
+"""Terminal shutdown cannot be undone by provider registration or reconnect."""
 
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event, Lock, current_thread
@@ -16,104 +16,52 @@ from tests.api.test_mqtt_provider_lifecycle import Provider, session
 
 
 @pytest.fixture
-def generic(monkeypatch):
-    vehicle = Vehicle(id="synthetic", mqtt_vehicle_id="synthetic-topic")
-    api = SimpleNamespace(
-        get_push_broker_info=Mock(return_value={"mqtt_host": "synthetic.example"}),
-        register_push_client=Mock(return_value={"client_id": "synthetic-client"}),
-        get_push_credentials=Mock(return_value=None),
-        get_push_vehicle_identity=Mock(return_value={}),
-        register_push_vehicle=Mock(return_value={}),
-        get_push_topics=Mock(return_value=["synthetic/topic"]),
-        close=Mock(),
-    )
-    transports = []
-
-    def factory(**callbacks):
-        client = SimpleNamespace(
-            is_connected=False,
-            configure=Mock(),
-            set_on_connection_change=Mock(),
-            subscribe=Mock(),
-        )
-
-        def connect():
-            client.is_connected = True
-            callbacks["on_connect"]()
-
-        def disconnect():
-            client.is_connected = False
-
-        client.connect = Mock(side_effect=connect)
-        client.disconnect = Mock(side_effect=disconnect)
-        transports.append(client)
-        return client
-
-    monkeypatch.setattr(
-        "custom_components.hyundai_jp._api.mqtt_push_session.MqttTransport", factory
-    )
+def scoped():
+    vehicle = Vehicle(id="synthetic")
+    provider = Provider()
+    original_start, original_stop = provider.start_push, provider.stop_push
+    provider.start_push = Mock(side_effect=original_start)
+    provider.stop_push = Mock(side_effect=original_stop)
+    api = SimpleNamespace(get_push_provider=Mock(return_value=provider), close=Mock())
     owner = MqttPushSession(
         api=api,
         token_fn=lambda: Token(username="synthetic", password="synthetic"),
         refresh_fn=Mock(),
         get_vehicle=lambda _: vehicle,
-        vehicles=lambda: {vehicle.id: vehicle},
         after_close_fn=api.close,
     )
-    return owner, api, transports
+    return owner, api, provider
 
 
-def http_calls(api):
-    return sum(
-        getattr(api, name).call_count
-        for name in (
-            "get_push_broker_info",
-            "register_push_client",
-            "get_push_credentials",
-            "get_push_vehicle_identity",
-            "register_push_vehicle",
-            "get_push_topics",
-        )
-    )
-
-
-@pytest.mark.parametrize(
-    "stage",
-    [
-        "get_push_broker_info",
-        "register_push_client",
-        "get_push_vehicle_identity",
-        "register_push_vehicle",
-    ],
-)
-def test_close_during_registration_cannot_start_later_stages(generic, stage):
-    owner, api, transports = generic
+@pytest.mark.parametrize("stage", ["lookup", "start"])
+def test_close_during_registration_cannot_start_later_stages(scoped, stage):
+    owner, api, provider = scoped
     entered, release = Event(), Event()
-    operation = getattr(api, stage)
-    response = operation.return_value
+    operation = api.get_push_provider if stage == "lookup" else provider.start_push
+    original = operation.side_effect
 
-    def block(*_args):
+    def block(*args):
         entered.set()
         assert release.wait(2)
-        return response
+        return original(*args) if callable(original) else operation.return_value
 
     operation.side_effect = block
     with ThreadPoolExecutor(max_workers=1) as executor:
         pending = executor.submit(owner.ensure_started, "synthetic")
         assert entered.wait(2)
-        calls = http_calls(api)
         owner.close()
         release.set()
         assert pending.result(timeout=2) is False
-    assert http_calls(api) == calls
-    assert transports == []
+    if stage == "lookup":
+        provider.start_push.assert_not_called()
+    assert not provider.is_connected
     assert not owner.is_connected
 
 
 def test_close_during_reconnect_token_refresh_never_registers_again(
-    generic, monkeypatch
+    scoped, monkeypatch
 ):
-    owner, api, transports = generic
+    owner, api, provider = scoped
     assert owner.ensure_started("synthetic")
     monkeypatch.setattr(const, "MQTT_PUSH_RECONNECT_INITIAL_DELAY", 0)
     entered, release = Event(), Event()
@@ -127,7 +75,7 @@ def test_close_during_reconnect_token_refresh_never_registers_again(
     owner._refresh_fn = refresh
     owner._on_push_disconnect("synthetic disconnect")
     assert entered.wait(2)
-    calls = http_calls(api)
+    calls = api.get_push_provider.call_count
     from tests.api.test_manager_cleanup import manager
 
     fleet = manager()
@@ -136,58 +84,45 @@ def test_close_during_reconnect_token_refresh_never_registers_again(
     fleet.close()
     release.set()
     workers[0].join(2)
-
     assert not workers[0].is_alive()
     assert api.close.call_count == 2
-    assert http_calls(api) == calls
-    assert len(transports) == 1
-    assert not transports[0].is_connected
+    assert api.get_push_provider.call_count == calls
+    assert not provider.is_connected
     assert not owner.is_connected
 
 
-def test_close_during_transport_connect_disconnects_late_connection(
-    generic, monkeypatch
-):
-    from custom_components.hyundai_jp._api import mqtt_push_session as hub
-
-    owner, _, transports = generic
+def test_close_during_provider_connect_disconnects_late_connection(scoped):
+    owner, _, provider = scoped
     entered, release = Event(), Event()
-    factory = hub.MqttTransport
+    original = provider.start_push.side_effect
 
-    def blocking_factory(**callbacks):
-        client = factory(**callbacks)
+    def connect(*args):
+        entered.set()
+        assert release.wait(2)
+        return original(*args)
 
-        def connect():
-            entered.set()
-            assert release.wait(2)
-            client.is_connected = True
-
-        client.connect.side_effect = connect
-        return client
-
-    monkeypatch.setattr(hub, "MqttTransport", blocking_factory)
+    provider.start_push.side_effect = connect
     with ThreadPoolExecutor(max_workers=1) as executor:
         pending = executor.submit(owner.ensure_started, "synthetic")
         assert entered.wait(2)
         owner.close()
         release.set()
         assert pending.result(timeout=2) is False
-
     assert not owner.is_connected
-    assert not transports[0].is_connected
-    assert transports[0].disconnect.call_count == 2
+    assert not provider.is_connected
+    assert provider.stop_push.call_count == 2
 
 
-def test_stop_allows_restart_but_close_is_terminal(generic):
-    owner, api, transports = generic
+def test_stop_allows_restart_but_close_is_terminal(scoped):
+    owner, api, provider = scoped
     assert owner.ensure_started("synthetic")
     owner.stop()
     assert owner.ensure_started("synthetic")
-    assert len(transports) == 2
+    assert provider.start_push.call_count == 2
     owner.close()
-    calls = http_calls(api)
+    calls = api.get_push_provider.call_count
     assert owner.ensure_started("synthetic") is False
-    assert http_calls(api) == calls
+    assert api.get_push_provider.call_count == calls
     assert not owner.is_connected
 
 
@@ -213,28 +148,26 @@ def test_terminal_close_preserves_owned_provider_stop_during_start():
     assert not provider.is_connected
 
 
-def test_close_attempts_all_providers_even_if_one_fails(generic):
-    owner, _, transports = generic
+def test_close_attempts_all_providers_even_if_one_fails(scoped):
+    owner, _, provider = scoped
     assert owner.ensure_started("synthetic")
     first = SimpleNamespace(stop_push=Mock())
     second = SimpleNamespace(stop_push=Mock(side_effect=RuntimeError("stop")))
-    owner._providers = {"first": first, "second": second}
-
+    owner._providers = {"first": first, "second": second, "synthetic": provider}
     with pytest.raises(RuntimeError, match="stop"):
         owner.close()
-
     first.stop_push.assert_called_once()
     second.stop_push.assert_called_once()
-    assert not transports[0].is_connected
+    assert not provider.is_connected
     assert owner.ensure_started("synthetic") is False
 
 
 def test_reconnect_finishing_after_close_releases_reopened_http_pool(
-    generic, monkeypatch
+    scoped, monkeypatch
 ):
     from tests.api.test_manager_cleanup import manager
 
-    owner, api, _ = generic
+    owner, api, _ = scoped
     assert owner.ensure_started("synthetic")
     monkeypatch.setattr(const, "MQTT_PUSH_RECONNECT_INITIAL_DELAY", 0)
     entered, release = Event(), Event()
@@ -258,7 +191,6 @@ def test_reconnect_finishing_after_close_releases_reopened_http_pool(
     reopened.close.assert_not_called()
     release.set()
     workers[0].join(2)
-
     assert not workers[0].is_alive()
     reopened.close.assert_called_once()
     assert not owner.is_connected
@@ -272,9 +204,9 @@ def test_reconnect_finishing_after_close_releases_reopened_http_pool(
     ],
 )
 def test_reconnect_errors_log_stage_and_type_without_private_message(
-    generic, monkeypatch, caplog, stage, expected
+    scoped, monkeypatch, caplog, stage, expected
 ):
-    owner, api, _ = generic
+    owner, api, _ = scoped
     assert owner.ensure_started("synthetic")
     monkeypatch.setattr(const, "MQTT_PUSH_RECONNECT_INITIAL_DELAY", 0)
     caplog.set_level("WARNING")
@@ -290,11 +222,10 @@ def test_reconnect_errors_log_stage_and_type_without_private_message(
     if stage == "refresh":
         owner._refresh_fn = fail
     else:
-        api.get_push_broker_info.side_effect = fail
+        api.get_push_provider.side_effect = fail
     owner._on_push_disconnect("synthetic disconnect")
     assert entered.wait(2)
     workers[0].join(2)
-
     assert not workers[0].is_alive()
     assert expected + " (RuntimeError)" in caplog.text
     assert "PRIVATE_ACCOUNT_TOKEN_AND_RESPONSE" not in caplog.text
@@ -306,9 +237,8 @@ def test_reconnect_recovers_failed_provider_when_other_vehicle_is_connected(
     providers = {"first": Provider(), "second": Provider()}
     vehicles = {key: Vehicle(id=key) for key in providers}
     restarted = Event()
-    workers = []
+    workers, calls = [], []
     original = providers["first"].start_push
-    calls = []
 
     def first_start(*args):
         calls.append(1)
@@ -323,7 +253,6 @@ def test_reconnect_recovers_failed_provider_when_other_vehicle_is_connected(
         token_fn=lambda: Token(username="synthetic", password="synthetic"),
         refresh_fn=Mock(),
         get_vehicle=vehicles.__getitem__,
-        vehicles=lambda: vehicles,
     )
     monkeypatch.setattr(const, "MQTT_PUSH_RECONNECT_INITIAL_DELAY", 0)
     assert owner.ensure_started("first")
@@ -332,7 +261,6 @@ def test_reconnect_recovers_failed_provider_when_other_vehicle_is_connected(
     providers["first"].connection(False)
     assert restarted.wait(2)
     workers[0].join(2)
-
     assert not workers[0].is_alive()
     assert providers["first"].is_connected
     assert providers["second"].is_connected
@@ -340,8 +268,8 @@ def test_reconnect_recovers_failed_provider_when_other_vehicle_is_connected(
     owner.close()
 
 
-def test_superseded_reconnect_cannot_rebuild_alongside_new_worker(generic, monkeypatch):
-    owner, api, transports = generic
+def test_superseded_reconnect_cannot_rebuild_alongside_new_worker(scoped, monkeypatch):
+    owner, api, provider = scoped
     assert owner.ensure_started("synthetic")
     entered, release, waiting, next_refresh = Event(), Event(), Event(), Event()
     workers, attempts = [], []
@@ -378,9 +306,7 @@ def test_superseded_reconnect_cannot_rebuild_alongside_new_worker(generic, monke
     for worker in workers:
         worker.join(2)
         assert not worker.is_alive()
-
-    assert api.get_push_broker_info.call_count == 2
-    assert len(transports) == 2
-    transports[0].disconnect.assert_called_once()
+    assert api.get_push_provider.call_count == 2
+    assert provider.start_push.call_count == 2
     assert owner.is_connected
     owner.close()
