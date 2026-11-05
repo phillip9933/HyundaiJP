@@ -68,16 +68,25 @@ integration entry to use a different account.
 
 ### Charge port and command progress
 
-Use the **Charge Port** cover for Open/Close controls and Open, Closed, Opening
-and Closing states. Its door icon changes with the state. Opening/Closing means
+Use the **Charge Port** button for a single action: open when the last reported
+position is closed, or close when it is open. HA labels this action **Press**.
+If the position is unknown, refresh status first; the button does not guess.
+
+The **Charge Port Status** cover keeps Open, Closed, Opening and Closing states
+and explicit Open/Close actions under Configuration. Its door icon changes with
+the state. Opening/Closing means
 the request is awaiting fresh car status; it does not claim the motor has
 already moved. Locks similarly show Locking/Unlocking while confirmation is
 pending. Old cached values do not clear this progress, and pending requests
 expire rather than remaining stuck indefinitely.
 
 The **Charge Port (legacy)** switch keeps its existing ID for automations. On an
-existing dashboard, select the new Charge Port cover to get the open/close
-presentation. There is no need to remove the account or recreate automations.
+existing dashboard, select the Charge Port button for the single action and the
+Charge Port Status cover for status. There is no need to remove the account or
+recreate automations. The old switch still follows telemetry, so it can appear in
+Activity even when a different control sent the request. If no dashboard or
+automation uses it, you can disable that legacy entity in its settings. Hiding
+it alone does not stop its state changes from appearing in Activity.
 
 Climate requests use current heater/defrost settings and the target selected in
 the climate card. Home Assistant converts your chosen display units to the
