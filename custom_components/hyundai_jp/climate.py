@@ -371,8 +371,17 @@ class HyundaiBluelinkCarClimateControlSwitch(HyundaiBluelinkEntity, ClimateEntit
                 raise
         self._publish_temperature_state()
 
-    # Home Assistant before 2026.11 reads the legacy property names.
-    if not hasattr(ClimateEntity, "native_temperature_unit"):
-        temperature_unit = native_temperature_unit
-        current_temperature = native_current_temperature
-        target_temperature = native_target_temperature
+
+# HA before 2026.11 reads these names; current HA marks them final and converts
+# the native properties itself. Register legacy descriptors only on older HA.
+if not hasattr(ClimateEntity, "native_temperature_unit"):
+    for legacy, native in (
+        ("temperature_unit", "native_temperature_unit"),
+        ("current_temperature", "native_current_temperature"),
+        ("target_temperature", "native_target_temperature"),
+    ):
+        setattr(
+            HyundaiBluelinkCarClimateControlSwitch,
+            legacy,
+            getattr(HyundaiBluelinkCarClimateControlSwitch, native),
+        )

@@ -9,7 +9,6 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 import pytest
-import voluptuous as vol
 
 from custom_components.hyundai_jp import services
 from custom_components.hyundai_jp._api import Vehicle, VehicleManager
@@ -23,6 +22,7 @@ from custom_components.hyundai_jp._api.options import (
 )
 from custom_components.hyundai_jp._api.Token import Token
 from custom_components.hyundai_jp.const import DOMAIN
+from custom_components.hyundai_jp.ha_validation import validation as vol
 from tests.ha.helpers import make_runtime_coordinator
 
 

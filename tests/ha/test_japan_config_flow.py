@@ -5,7 +5,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-import voluptuous as vol
 
 from custom_components.hyundai_jp import config_flow
 from custom_components.hyundai_jp.config_flow import (
@@ -13,6 +12,7 @@ from custom_components.hyundai_jp.config_flow import (
     ConfigFlow,
 )
 from custom_components.hyundai_jp.const import DOMAIN
+from custom_components.hyundai_jp.ha_validation import validation as vol
 
 
 def flow_fixture(monkeypatch):

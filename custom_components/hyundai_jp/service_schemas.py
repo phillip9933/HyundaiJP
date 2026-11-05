@@ -7,7 +7,9 @@ from typing import Any
 
 from homeassistant.const import ATTR_DEVICE_ID
 from homeassistant.helpers import config_validation as cv
-import voluptuous as vol
+from homeassistant.helpers.typing import VolSchemaType
+
+from .ha_validation import Schema, validation as vol
 
 from ._api.control_validation import CLIMATE_DURATION_MAX, CLIMATE_DURATION_MIN
 
@@ -61,9 +63,9 @@ def _changes(*names: str) -> Callable[[dict[str, Any]], dict[str, Any]]:
 
 def _schema(
     fields: dict[Any, Any] | None = None, changes: tuple[str, ...] = ()
-) -> vol.Schema:
-    schema = vol.Schema({vol.Optional(ATTR_DEVICE_ID): _device, **(fields or {})})
-    return vol.Schema(vol.All(schema, _changes(*changes))) if changes else schema
+) -> VolSchemaType:
+    schema = Schema({vol.Optional(ATTR_DEVICE_ID): _device, **(fields or {})})
+    return Schema(vol.All(schema, _changes(*changes))) if changes else schema
 
 
 def _optional(validator: Any) -> Any:

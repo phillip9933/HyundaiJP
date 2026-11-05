@@ -17,7 +17,6 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.selector import selector
-import voluptuous as vol
 
 from ._api import VehicleManager
 from ._api.exceptions import AuthenticationError
@@ -36,6 +35,7 @@ from .const import (
     DEFAULT_USE_EMAIL_WITH_GEOCODE_API,
     DOMAIN,
 )
+from .ha_validation import Schema, validation as vol
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ def _account_unique_id(username: str) -> str:
     return hashlib.sha256(username.strip().casefold().encode("utf-8")).hexdigest()
 
 
-STEP_RECONFIGURE_DATA_SCHEMA = vol.Schema(
+STEP_RECONFIGURE_DATA_SCHEMA = Schema(
     {
         vol.Required("reconfigure_choice"): selector(
             {
@@ -61,13 +61,13 @@ STEP_RECONFIGURE_DATA_SCHEMA = vol.Schema(
     }
 )
 
-STEP_PIN_ONLY_SCHEMA = vol.Schema(
+STEP_PIN_ONLY_SCHEMA = Schema(
     {
         vol.Required(CONF_PIN): vol.All(str, vol.Length(min=1)),
     }
 )
 
-STEP_CREDENTIALS_DATA_SCHEMA = vol.Schema(
+STEP_CREDENTIALS_DATA_SCHEMA = Schema(
     {
         vol.Required(CONF_USERNAME): str,
         vol.Required(CONF_PASSWORD): selector({"text": {"type": "password"}}),
@@ -75,7 +75,7 @@ STEP_CREDENTIALS_DATA_SCHEMA = vol.Schema(
     }
 )
 
-OPTIONS_SCHEMA = vol.Schema(
+OPTIONS_SCHEMA = Schema(
     {
         vol.Required(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): vol.All(
             vol.Coerce(int), vol.Range(min=15, max=999)
