@@ -12,6 +12,7 @@ import re
 import time
 from typing import TYPE_CHECKING, Any, TypedDict
 
+from .control_validation import vehicle_identifier
 from .exceptions import (
     APIError,
     AuthenticationError,
@@ -189,10 +190,7 @@ class JapanSVM:
             raise UnsupportedControlError(
                 "Japan vehicle does not support camera capture"
             )
-        if not isinstance(vehicle.id, str) or not re.fullmatch(
-            r"[A-Za-z0-9_-]+", vehicle.id
-        ):
-            raise InvalidAPIResponseError("Japan vehicle identifier is invalid")
+        vehicle_identifier(vehicle.id)
         # The app's camera flow validates its PIN grant before requesting an
         # image, but SVMApi deliberately uses the ordinary OAuth authorization.
         self._japan_svm_diagnostics["stage"] = "pin"

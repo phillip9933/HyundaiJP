@@ -31,6 +31,12 @@ from .const import (
     VEHICLE_LOCK_ACTION,
     WINDOW_STATE,
 )
+from .control_validation import (
+    is_finite_number,
+    is_integer,
+    is_number,
+    vehicle_identifier,
+)
 from .exceptions import (
     AuthenticationError,
     BluelinkError,
@@ -68,6 +74,9 @@ class JapanCommandsMixin:
         def _mqtt_for_vehicle(
             self, token: Token, vehicle: Vehicle
         ) -> JapanMqttSession: ...
+        def _temperature_values(
+            self, vehicle: Vehicle, hvac_type: object = None
+        ) -> tuple[float | None, ...]: ...
         def _legacy_temperature(
             self, vehicle: Vehicle, air_temp: object
         ) -> float | None: ...
@@ -87,11 +96,7 @@ class JapanCommandsMixin:
         return value if isinstance(value, dict) else {}
 
     def _command_vehicle_id(self, vehicle: Vehicle) -> str:
-        if not isinstance(vehicle.id, str) or not re.fullmatch(
-            r"[A-Za-z0-9_-]+", vehicle.id
-        ):
-            raise InvalidAPIResponseError("Japan vehicle identifier is invalid")
-        return vehicle.id
+        return vehicle_identifier(vehicle.id)
 
     @staticmethod
     def _require_mqtt_identity(token: Token) -> None:
@@ -114,9 +119,7 @@ class JapanCommandsMixin:
             isinstance(token.control_token, str)
             and token.control_token.startswith("Bearer ")
             and bool(token.control_token[7:].strip())
-            and not isinstance(expiry, bool)
-            and isinstance(expiry, (int, float))
-            and math.isfinite(expiry)
+            and is_finite_number(expiry)
             and expiry > time.time()
         )
 
@@ -150,9 +153,7 @@ class JapanCommandsMixin:
         if (
             not isinstance(control, str)
             or not control
-            or isinstance(expires, bool)
-            or not isinstance(expires, (int, float))
-            or not math.isfinite(expires)
+            or not is_finite_number(expires)
             or expires <= 0
         ):
             raise InvalidAPIResponseError("Japan control token is incomplete")
@@ -386,12 +387,8 @@ class JapanCommandsMixin:
                     raise TypeError
                 lat, lon = coord["lat"], coord["lon"]
                 if (
-                    isinstance(lat, bool)
-                    or isinstance(lon, bool)
-                    or not isinstance(lat, (int, float))
-                    or not isinstance(lon, (int, float))
-                    or not math.isfinite(lat)
-                    or not math.isfinite(lon)
+                    not is_finite_number(lat)
+                    or not is_finite_number(lon)
                     or not -90 <= lat <= 90
                     or not -180 <= lon <= 180
                     or coord.get("type") != 0
@@ -455,12 +452,7 @@ class JapanCommandsMixin:
         service = self._japan_profile_section(vehicle, "serviceOption")
         if not self._japan_capability(service.get("v2LSocSetServiceOption")):
             raise UnsupportedControlError("Japan V2L limit capability is absent")
-        if (
-            isinstance(limit, bool)
-            or not isinstance(limit, int)
-            or not 20 <= limit <= 80
-            or limit % 10
-        ):
+        if not is_integer(limit) or not 20 <= limit <= 80 or limit % 10:
             raise ValueError("Japan V2L limit is invalid")
         return self._japan_command(
             token, vehicle, "charge/dischargelimit", {"dischargingLimit": limit}
@@ -672,9 +664,7 @@ class JapanCommandsMixin:
             else options.temperature
         )
         if temperature is not None and options.temperature_unit == 1:
-            if isinstance(temperature, bool) or not isinstance(
-                temperature, (int, float)
-            ):
+            if not is_number(temperature):
                 raise ValueError("Japan schedule temperature must be numeric")
             temperature = (temperature - 32) * 5 / 9
         climate_enabled = (
@@ -704,20 +694,8 @@ class JapanCommandsMixin:
                 hvac_type = air.get(
                     "hvacTempType", profile.get("option", {}).get("hvacTempType")
                 )
-                valid = [
-                    self._legacy_temperature(
-                        vehicle,
-                        {
-                            "unit": 0,
-                            "hvacTempType": hvac_type,
-                            "value": f"{code:02X}H",
-                        },
-                    )
-                    for code in range(0x40)
-                ]
-                if isinstance(temperature, bool) or not isinstance(
-                    temperature, (int, float)
-                ):
+                valid = self._temperature_values(vehicle, hvac_type)
+                if not is_number(temperature):
                     raise ValueError("Japan schedule temperature must be numeric")
                 matched = next(
                     (
@@ -1062,10 +1040,7 @@ class JapanCommandsMixin:
         """Store charge targets; HTTP success confirms the cloud setting write."""
         vehicle_id = self._command_vehicle_id(vehicle)
         if any(
-            isinstance(value, bool)
-            or not isinstance(value, int)
-            or not 50 <= value <= 100
-            or value % 10
+            not is_integer(value) or not 50 <= value <= 100 or value % 10
             for value in (ac, dc)
         ):
             raise ValueError("Japan charge targets must be 50–100 in steps of ten")

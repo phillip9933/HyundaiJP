@@ -20,6 +20,7 @@ import requests
 
 from .authentication import JapanAuthClient
 from .const import ENGINE_TYPES, ORDER_STATUS, SEAT_STATUS
+from .control_validation import is_finite_number, temperature_table, vehicle_identifier
 from .exceptions import (
     APIError,
     AuthenticationError,
@@ -591,8 +592,7 @@ class HyundaiBluelinkApi(JapanCommandsMixin, JapanSVM, JapanAuthClient):
             ):
                 raise InvalidAPIResponseError("Japan vehicle identifier is missing")
             vehicle_id = entry["vehicleId"]
-            if not re.fullmatch(r"[A-Za-z0-9_-]+", vehicle_id):
-                raise InvalidAPIResponseError("Japan vehicle identifier is invalid")
+            vehicle_identifier(vehicle_id)
             result = self._request(
                 "GET",
                 f"/api/v1/spa/vehicles/{vehicle_id}/profile",
@@ -631,10 +631,7 @@ class HyundaiBluelinkApi(JapanCommandsMixin, JapanSVM, JapanAuthClient):
         protocol = vehicle.ccu_ccs2_protocol_support
         if type(protocol) is not int or protocol < 0:
             raise InvalidAPIResponseError("Japan vehicle status protocol is missing")
-        if not isinstance(vehicle.id, str) or not re.fullmatch(
-            r"[A-Za-z0-9_-]+", vehicle.id
-        ):
-            raise InvalidAPIResponseError("Japan vehicle identifier is invalid")
+        self._command_vehicle_id(vehicle)
         endpoint = "ccs2/carstatus/latest" if protocol else "status/latest"
         headers = self._vehicle_headers(token, vehicle)
         headers["ccuCCS2ProtocolSupport"] = str(protocol)
@@ -875,6 +872,12 @@ class HyundaiBluelinkApi(JapanCommandsMixin, JapanSVM, JapanAuthClient):
         vehicle.ev_charge_limits_ac = targets.get(1, targets.get(2))
         vehicle.ev_charge_limits_dc = targets.get(0)
 
+    def _temperature_values(
+        self, vehicle: Vehicle, hvac_type: object = None
+    ) -> tuple[float | None, ...]:
+        """Share the code table between climate and schedule payload validation."""
+        return temperature_table(self._temperature_scale(vehicle, hvac_type))
+
     def _legacy_temperature(self, vehicle: Vehicle, air_temp: object) -> float | None:
         """Decode profile-dependent Japan temperature codes, leaving LO/HI unknown."""
         if not isinstance(air_temp, dict) or air_temp.get("unit", 0) != 0:
@@ -919,10 +922,7 @@ class HyundaiBluelinkApi(JapanCommandsMixin, JapanSVM, JapanAuthClient):
         self, token: Token, vehicle: Vehicle
     ) -> None:
         """Read the stored parking position without contacting the vehicle."""
-        if not isinstance(vehicle.id, str) or not re.fullmatch(
-            r"[A-Za-z0-9_-]+", vehicle.id
-        ):
-            raise InvalidAPIResponseError("Japan vehicle identifier is invalid")
+        self._command_vehicle_id(vehicle)
         payload = self._payload(
             self._request(
                 "GET",
@@ -957,10 +957,7 @@ class HyundaiBluelinkApi(JapanCommandsMixin, JapanSVM, JapanAuthClient):
 
     def update_vehicle_with_driving_info(self, token: Token, vehicle: Vehicle) -> None:
         """Read all-time stored EV energy history (periodTarget 0)."""
-        if not isinstance(vehicle.id, str) or not re.fullmatch(
-            r"[A-Za-z0-9_-]+", vehicle.id
-        ):
-            raise InvalidAPIResponseError("Japan vehicle identifier is invalid")
+        self._command_vehicle_id(vehicle)
         payload = self._payload(
             self._request(
                 "POST",
@@ -987,12 +984,7 @@ class HyundaiBluelinkApi(JapanCommandsMixin, JapanSVM, JapanAuthClient):
             value = all_time.get(key)
             if value is None:
                 return None
-            if (
-                isinstance(value, bool)
-                or not isinstance(value, (int, float))
-                or not math.isfinite(value)
-                or value < 0
-            ):
+            if not is_finite_number(value) or value < 0:
                 raise InvalidAPIResponseError("Japan driving history metric is invalid")
             return value
 
@@ -1024,12 +1016,7 @@ class HyundaiBluelinkApi(JapanCommandsMixin, JapanSVM, JapanAuthClient):
                 "calculativeOdo",
             ):
                 value = day.get(key)
-                if value is not None and (
-                    isinstance(value, bool)
-                    or not isinstance(value, (int, float))
-                    or not math.isfinite(value)
-                    or value < 0
-                ):
+                if value is not None and (not is_finite_number(value) or value < 0):
                     raise InvalidAPIResponseError(
                         "Japan daily energy metric is invalid"
                     )
