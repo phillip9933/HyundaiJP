@@ -6,7 +6,7 @@ from homeassistant.const import UnitOfTemperature
 import pytest
 
 from custom_components.hyundai_jp._api import Vehicle
-from custom_components.hyundai_jp.climate import HyundaiKiaCarClimateControlSwitch
+from custom_components.hyundai_jp.climate import HyundaiBluelinkCarClimateControlSwitch
 from custom_components.hyundai_jp.coordinator import JapanDataUpdateCoordinator
 
 
@@ -18,7 +18,7 @@ def entity(bounds=None, unit=UnitOfTemperature.CELSIUS, japan=True):
     coordinator = (
         MagicMock(spec=JapanDataUpdateCoordinator) if japan and bounds else MagicMock()
     )
-    return HyundaiKiaCarClimateControlSwitch(coordinator, vehicle)
+    return HyundaiBluelinkCarClimateControlSwitch(coordinator, vehicle)
 
 
 @pytest.mark.parametrize("bounds", [(17.0, 27.0), (15.5, 29.5), (15.0, 30.0)])

@@ -10,7 +10,7 @@ from custom_components.hyundai_jp._api import Vehicle
 from custom_components.hyundai_jp._api.const import SEAT_STATUS
 from custom_components.hyundai_jp.binary_sensor import (
     SENSOR_DESCRIPTIONS,
-    HyundaiKiaBinarySensorEntityDescription,
+    HyundaiBluelinkBinarySensorEntityDescription,
 )
 
 SEAT_KEYS = {
@@ -21,7 +21,7 @@ SEAT_KEYS = {
 }
 
 
-def _description(key: str) -> HyundaiKiaBinarySensorEntityDescription:
+def _description(key: str) -> HyundaiBluelinkBinarySensorEntityDescription:
     return next(d for d in SENSOR_DESCRIPTIONS if d.key == key)
 
 

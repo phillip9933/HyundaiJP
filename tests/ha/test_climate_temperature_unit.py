@@ -6,16 +6,16 @@ from homeassistant.const import UnitOfTemperature
 import pytest
 
 from custom_components.hyundai_jp._api import Vehicle
-from custom_components.hyundai_jp.climate import HyundaiKiaCarClimateControlSwitch
+from custom_components.hyundai_jp.climate import HyundaiBluelinkCarClimateControlSwitch
 
 
 def _entity(
     car_unit: str | None, ha_unit: UnitOfTemperature | None
-) -> HyundaiKiaCarClimateControlSwitch:
+) -> HyundaiBluelinkCarClimateControlSwitch:
     vehicle = Vehicle(id="v1", name="test", model="test")
     vehicle.air_control_is_on = False
     vehicle.air_temperature = (None, car_unit)
-    entity = HyundaiKiaCarClimateControlSwitch(MagicMock(), vehicle)
+    entity = HyundaiBluelinkCarClimateControlSwitch(MagicMock(), vehicle)
     if ha_unit is not None:
         entity.hass = MagicMock()
         entity.hass.config.units.temperature_unit = ha_unit

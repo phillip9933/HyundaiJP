@@ -24,32 +24,32 @@ from .entity import HyundaiBluelinkEntity
 
 
 @dataclass(frozen=True, kw_only=True)
-class HyundaiKiaCoverDescription(CoverEntityDescription):
+class HyundaiBluelinkCoverDescription(CoverEntityDescription):
     """Describes a Hyundai Bluelink JP window cover entity."""
 
     window_position: str
 
 
-COVER_DESCRIPTIONS: Final[tuple[HyundaiKiaCoverDescription, ...]] = (
-    HyundaiKiaCoverDescription(
+COVER_DESCRIPTIONS: Final[tuple[HyundaiBluelinkCoverDescription, ...]] = (
+    HyundaiBluelinkCoverDescription(
         key="front_left_window_is_open",
         translation_key="front_left_window",
         icon="mdi:car-door",
         window_position="front_left",
     ),
-    HyundaiKiaCoverDescription(
+    HyundaiBluelinkCoverDescription(
         key="front_right_window_is_open",
         translation_key="front_right_window",
         icon="mdi:car-door",
         window_position="front_right",
     ),
-    HyundaiKiaCoverDescription(
+    HyundaiBluelinkCoverDescription(
         key="back_left_window_is_open",
         translation_key="back_left_window",
         icon="mdi:car-door",
         window_position="back_left",
     ),
-    HyundaiKiaCoverDescription(
+    HyundaiBluelinkCoverDescription(
         key="back_right_window_is_open",
         translation_key="back_right_window",
         icon="mdi:car-door",
@@ -100,12 +100,12 @@ class HyundaiBluelinkCover(CoverEntity, HyundaiBluelinkEntity):
     def __init__(
         self,
         coordinator: JapanDataUpdateCoordinator,
-        description: HyundaiKiaCoverDescription,
+        description: HyundaiBluelinkCoverDescription,
         vehicle: Vehicle,
     ) -> None:
         """Initialize the window cover."""
         HyundaiBluelinkEntity.__init__(self, coordinator, vehicle)
-        self.entity_description: HyundaiKiaCoverDescription = description
+        self.entity_description: HyundaiBluelinkCoverDescription = description
         self._attr_unique_id = f"{DOMAIN}_{vehicle.id}_{description.key}"
 
     @property

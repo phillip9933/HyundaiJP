@@ -39,14 +39,16 @@ async def async_setup_entry(
     entities = []
     for vehicle in coordinator.vehicle_manager.vehicles.values():
         if vehicle.air_control_is_on is not None:
-            entities.append(HyundaiKiaCarClimateControlSwitch(coordinator, vehicle))
+            entities.append(
+                HyundaiBluelinkCarClimateControlSwitch(coordinator, vehicle)
+            )
     async_add_entities(entities)
 
 
 PARALLEL_UPDATES = 1
 
 
-class HyundaiKiaCarClimateControlSwitch(HyundaiBluelinkEntity, ClimateEntity):
+class HyundaiBluelinkCarClimateControlSwitch(HyundaiBluelinkEntity, ClimateEntity):
     """Hyundai Bluelink JP Car Climate Control."""
 
     vehicle: Vehicle

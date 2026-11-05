@@ -7,7 +7,7 @@ from homeassistant.util.unit_system import METRIC_SYSTEM, US_CUSTOMARY_SYSTEM
 import pytest
 
 from custom_components.hyundai_jp._api import Vehicle
-from custom_components.hyundai_jp.climate import HyundaiKiaCarClimateControlSwitch
+from custom_components.hyundai_jp.climate import HyundaiBluelinkCarClimateControlSwitch
 
 
 @pytest.mark.parametrize(
@@ -23,7 +23,7 @@ def test_native_temperature_preserves_units_and_display(
     vehicle = Vehicle(id="v1", name="test", model="test")
     vehicle.air_control_is_on = False
     vehicle.air_temperature = (value, unit)
-    entity = HyundaiKiaCarClimateControlSwitch(MagicMock(), vehicle)
+    entity = HyundaiBluelinkCarClimateControlSwitch(MagicMock(), vehicle)
     entity.hass = MagicMock()
     entity.hass.config.units = ha_units
 

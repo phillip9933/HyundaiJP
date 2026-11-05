@@ -10,11 +10,11 @@ import pytest
 
 from custom_components.hyundai_jp.button import (
     BUTTON_DESCRIPTIONS,
-    HyundaiKiaButtonDescription,
+    HyundaiBluelinkButtonDescription,
 )
 
 
-def _find_description(key: str) -> HyundaiKiaButtonDescription:
+def _find_description(key: str) -> HyundaiBluelinkButtonDescription:
     for description in BUTTON_DESCRIPTIONS:
         if description.key == key:
             return description

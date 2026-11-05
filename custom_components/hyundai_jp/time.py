@@ -19,7 +19,7 @@ from .entity import HyundaiBluelinkEntity
 
 
 @dataclass(frozen=True, kw_only=True)
-class HyundaiKiaTimeDescription(TimeEntityDescription):
+class HyundaiBluelinkTimeDescription(TimeEntityDescription):
     """Describes a Hyundai Bluelink JP time entity."""
 
     value_fn: Callable[[Vehicle], dt.time | None]
@@ -27,8 +27,8 @@ class HyundaiKiaTimeDescription(TimeEntityDescription):
     set_fn: Callable[[JapanDataUpdateCoordinator, str, dt.time], Awaitable[None]]
 
 
-TIME_DESCRIPTIONS: Final[tuple[HyundaiKiaTimeDescription, ...]] = (
-    HyundaiKiaTimeDescription(
+TIME_DESCRIPTIONS: Final[tuple[HyundaiBluelinkTimeDescription, ...]] = (
+    HyundaiBluelinkTimeDescription(
         key="ev_off_peak_start_time",
         translation_key="ev_off_peak_start_time",
         icon="mdi:clock-time-ten",
@@ -38,7 +38,7 @@ TIME_DESCRIPTIONS: Final[tuple[HyundaiKiaTimeDescription, ...]] = (
             vid, start=value
         ),
     ),
-    HyundaiKiaTimeDescription(
+    HyundaiBluelinkTimeDescription(
         key="ev_off_peak_end_time",
         translation_key="ev_off_peak_end_time",
         icon="mdi:clock-time-two",
@@ -79,12 +79,12 @@ PARALLEL_UPDATES = 1
 class HyundaiBluelinkTimeEntity(TimeEntity, HyundaiBluelinkEntity):
     """Off-peak charging start or end time."""
 
-    entity_description: HyundaiKiaTimeDescription
+    entity_description: HyundaiBluelinkTimeDescription
 
     def __init__(
         self,
         coordinator: JapanDataUpdateCoordinator,
-        description: HyundaiKiaTimeDescription,
+        description: HyundaiBluelinkTimeDescription,
         vehicle: Vehicle,
     ) -> None:
         """Initialize the time entity."""

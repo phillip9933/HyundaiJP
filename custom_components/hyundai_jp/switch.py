@@ -20,7 +20,7 @@ from .entity import HyundaiBluelinkEntity
 
 
 @dataclass(frozen=True, kw_only=True)
-class HyundaiKiaSwitchDescription(SwitchEntityDescription):
+class HyundaiBluelinkSwitchDescription(SwitchEntityDescription):
     """Describes a Hyundai Bluelink JP switch entity."""
 
     value_fn: Callable[[Vehicle], bool | None]
@@ -30,8 +30,8 @@ class HyundaiKiaSwitchDescription(SwitchEntityDescription):
     off_fn: Callable[[JapanDataUpdateCoordinator, str], Awaitable[None]]
 
 
-SWITCH_DESCRIPTIONS: Final[tuple[HyundaiKiaSwitchDescription, ...]] = (
-    HyundaiKiaSwitchDescription(
+SWITCH_DESCRIPTIONS: Final[tuple[HyundaiBluelinkSwitchDescription, ...]] = (
+    HyundaiBluelinkSwitchDescription(
         key="ev_battery_is_charging",
         commands=("start_charge", "stop_charge"),
         translation_key="ev_charging",
@@ -41,7 +41,7 @@ SWITCH_DESCRIPTIONS: Final[tuple[HyundaiKiaSwitchDescription, ...]] = (
         on_fn=lambda coordinator, vid: coordinator.async_start_charge(vid),
         off_fn=lambda coordinator, vid: coordinator.async_stop_charge(vid),
     ),
-    HyundaiKiaSwitchDescription(
+    HyundaiBluelinkSwitchDescription(
         key="air_control_is_on",
         commands=("start_climate", "stop_climate"),
         translation_key="climate",
@@ -52,7 +52,7 @@ SWITCH_DESCRIPTIONS: Final[tuple[HyundaiKiaSwitchDescription, ...]] = (
         off_fn=lambda coordinator, vid: coordinator.async_stop_climate(vid),
     ),
     # Departure schedule switches
-    HyundaiKiaSwitchDescription(
+    HyundaiBluelinkSwitchDescription(
         key="ev_first_departure_enabled",
         translation_key="ev_first_departure_enabled",
         icon="mdi:clock-outline",
@@ -65,7 +65,7 @@ SWITCH_DESCRIPTIONS: Final[tuple[HyundaiKiaSwitchDescription, ...]] = (
             vid, 1, False
         ),
     ),
-    HyundaiKiaSwitchDescription(
+    HyundaiBluelinkSwitchDescription(
         key="ev_second_departure_enabled",
         translation_key="ev_second_departure_enabled",
         icon="mdi:clock-outline",
@@ -78,7 +78,7 @@ SWITCH_DESCRIPTIONS: Final[tuple[HyundaiKiaSwitchDescription, ...]] = (
             vid, 2, False
         ),
     ),
-    HyundaiKiaSwitchDescription(
+    HyundaiBluelinkSwitchDescription(
         key="ev_first_departure_climate_enabled",
         translation_key="ev_first_departure_climate_enabled",
         icon="mdi:air-conditioner",
@@ -93,7 +93,7 @@ SWITCH_DESCRIPTIONS: Final[tuple[HyundaiKiaSwitchDescription, ...]] = (
             vid, 1, False
         ),
     ),
-    HyundaiKiaSwitchDescription(
+    HyundaiBluelinkSwitchDescription(
         key="ev_second_departure_climate_enabled",
         translation_key="ev_second_departure_climate_enabled",
         icon="mdi:air-conditioner",
@@ -108,7 +108,7 @@ SWITCH_DESCRIPTIONS: Final[tuple[HyundaiKiaSwitchDescription, ...]] = (
             vid, 2, False
         ),
     ),
-    HyundaiKiaSwitchDescription(
+    HyundaiBluelinkSwitchDescription(
         key="ev_first_departure_climate_defrost",
         translation_key="ev_first_departure_climate_defrost",
         icon="mdi:car-defrost-rear",
@@ -123,7 +123,7 @@ SWITCH_DESCRIPTIONS: Final[tuple[HyundaiKiaSwitchDescription, ...]] = (
             vid, 1, False
         ),
     ),
-    HyundaiKiaSwitchDescription(
+    HyundaiBluelinkSwitchDescription(
         key="ev_second_departure_climate_defrost",
         translation_key="ev_second_departure_climate_defrost",
         icon="mdi:car-defrost-rear",
@@ -139,7 +139,7 @@ SWITCH_DESCRIPTIONS: Final[tuple[HyundaiKiaSwitchDescription, ...]] = (
         ),
     ),
     # Charging schedule switches
-    HyundaiKiaSwitchDescription(
+    HyundaiBluelinkSwitchDescription(
         key="ev_schedule_charge_enabled",
         translation_key="ev_schedule_charge_enabled",
         icon="mdi:calendar-clock",
@@ -152,7 +152,7 @@ SWITCH_DESCRIPTIONS: Final[tuple[HyundaiKiaSwitchDescription, ...]] = (
             vid, False
         ),
     ),
-    HyundaiKiaSwitchDescription(
+    HyundaiBluelinkSwitchDescription(
         key="ev_off_peak_charge_only_enabled",
         translation_key="ev_off_peak_charge_only_enabled",
         icon="mdi:clock-outline",
@@ -165,7 +165,7 @@ SWITCH_DESCRIPTIONS: Final[tuple[HyundaiKiaSwitchDescription, ...]] = (
             coordinator.async_set_off_peak_charge_only_enabled(vid, False)
         ),
     ),
-    HyundaiKiaSwitchDescription(
+    HyundaiBluelinkSwitchDescription(
         key="ev_charge_port_door_is_open",
         commands=("charge_port_action",),
         translation_key="ev_charge_port_door",
@@ -175,7 +175,7 @@ SWITCH_DESCRIPTIONS: Final[tuple[HyundaiKiaSwitchDescription, ...]] = (
         on_fn=lambda coordinator, vid: coordinator.async_open_charge_port(vid),
         off_fn=lambda coordinator, vid: coordinator.async_close_charge_port(vid),
     ),
-    HyundaiKiaSwitchDescription(
+    HyundaiBluelinkSwitchDescription(
         key="valet_mode_control",
         commands=("valet_mode_action",),
         translation_key="valet_mode_control",
@@ -222,12 +222,12 @@ PARALLEL_UPDATES = 1
 class HyundaiBluelinkSwitch(SwitchEntity, HyundaiBluelinkEntity):
     """Switch backed by a vehicle on/off command pair."""
 
-    entity_description: HyundaiKiaSwitchDescription
+    entity_description: HyundaiBluelinkSwitchDescription
 
     def __init__(
         self,
         coordinator: JapanDataUpdateCoordinator,
-        description: HyundaiKiaSwitchDescription,
+        description: HyundaiBluelinkSwitchDescription,
         vehicle: Vehicle,
     ) -> None:
         """Initialize the switch."""

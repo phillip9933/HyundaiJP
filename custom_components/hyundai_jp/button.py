@@ -18,7 +18,7 @@ from .entity import HyundaiBluelinkEntity
 
 
 @dataclass(frozen=True, kw_only=True)
-class HyundaiKiaButtonDescription(ButtonEntityDescription):
+class HyundaiBluelinkButtonDescription(ButtonEntityDescription):
     """Describes a Hyundai Bluelink JP button entity."""
 
     press_action: str
@@ -27,14 +27,14 @@ class HyundaiKiaButtonDescription(ButtonEntityDescription):
     enabled_fn: Callable[[Vehicle], bool] = lambda _: True
 
 
-BUTTON_DESCRIPTIONS: Final[tuple[HyundaiKiaButtonDescription, ...]] = (
-    HyundaiKiaButtonDescription(
+BUTTON_DESCRIPTIONS: Final[tuple[HyundaiBluelinkButtonDescription, ...]] = (
+    HyundaiBluelinkButtonDescription(
         key="force_refresh",
         translation_key="force_refresh",
         icon="mdi:refresh",
         press_action="async_force_refresh_vehicle",
     ),
-    HyundaiKiaButtonDescription(
+    HyundaiBluelinkButtonDescription(
         key="start_hazard_lights",
         command="start_hazard_lights",
         translation_key="start_hazard_lights",
@@ -42,7 +42,7 @@ BUTTON_DESCRIPTIONS: Final[tuple[HyundaiKiaButtonDescription, ...]] = (
         press_action="async_start_hazard_lights",
         enabled_fn=lambda _: False,
     ),
-    HyundaiKiaButtonDescription(
+    HyundaiBluelinkButtonDescription(
         key="start_hazard_lights_and_horn",
         command="start_hazard_lights_and_horn",
         translation_key="start_hazard_lights_and_horn",
@@ -50,7 +50,7 @@ BUTTON_DESCRIPTIONS: Final[tuple[HyundaiKiaButtonDescription, ...]] = (
         press_action="async_start_hazard_lights_and_horn",
         enabled_fn=lambda _: False,
     ),
-    HyundaiKiaButtonDescription(
+    HyundaiBluelinkButtonDescription(
         key="start_valet_mode",
         command="valet_mode_action",
         translation_key="start_valet_mode",
@@ -58,7 +58,7 @@ BUTTON_DESCRIPTIONS: Final[tuple[HyundaiKiaButtonDescription, ...]] = (
         press_action="async_start_valet_mode",
         exists_fn=lambda vehicle: bool(vehicle.supports.valet_mode),
     ),
-    HyundaiKiaButtonDescription(
+    HyundaiBluelinkButtonDescription(
         key="stop_valet_mode",
         command="valet_mode_action",
         translation_key="stop_valet_mode",
@@ -66,7 +66,7 @@ BUTTON_DESCRIPTIONS: Final[tuple[HyundaiKiaButtonDescription, ...]] = (
         press_action="async_stop_valet_mode",
         exists_fn=lambda vehicle: bool(vehicle.supports.valet_mode),
     ),
-    HyundaiKiaButtonDescription(
+    HyundaiBluelinkButtonDescription(
         key="open_all_windows",
         command="set_windows_state",
         translation_key="open_all_windows",
@@ -77,7 +77,7 @@ BUTTON_DESCRIPTIONS: Final[tuple[HyundaiKiaButtonDescription, ...]] = (
             and vehicle.front_left_window_is_open is not None
         ),
     ),
-    HyundaiKiaButtonDescription(
+    HyundaiBluelinkButtonDescription(
         key="close_all_windows",
         command="set_windows_state",
         translation_key="close_all_windows",
@@ -88,7 +88,7 @@ BUTTON_DESCRIPTIONS: Final[tuple[HyundaiKiaButtonDescription, ...]] = (
             and vehicle.front_left_window_is_open is not None
         ),
     ),
-    HyundaiKiaButtonDescription(
+    HyundaiBluelinkButtonDescription(
         key="vent_all_windows",
         command="set_windows_state",
         translation_key="vent_all_windows",
@@ -99,7 +99,7 @@ BUTTON_DESCRIPTIONS: Final[tuple[HyundaiKiaButtonDescription, ...]] = (
             and vehicle.front_left_window_is_open is not None
         ),
     ),
-    HyundaiKiaButtonDescription(
+    HyundaiBluelinkButtonDescription(
         key="capture_svm_image",
         command="request_svm_capture",
         translation_key="capture_svm_image",
@@ -141,12 +141,12 @@ class HyundaiBluelinkButton(ButtonEntity, HyundaiBluelinkEntity):
     def __init__(
         self,
         coordinator: JapanDataUpdateCoordinator,
-        description: HyundaiKiaButtonDescription,
+        description: HyundaiBluelinkButtonDescription,
         vehicle: Vehicle,
     ) -> None:
         """Initialize the button."""
         HyundaiBluelinkEntity.__init__(self, coordinator, vehicle)
-        self.entity_description: HyundaiKiaButtonDescription = description
+        self.entity_description: HyundaiBluelinkButtonDescription = description
         self._key = description.key
         self._attr_unique_id = f"{DOMAIN}_{vehicle.id}_{self._key}"
         self._attr_icon = description.icon

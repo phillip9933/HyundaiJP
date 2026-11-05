@@ -21,7 +21,7 @@ import pytest
 
 from custom_components.hyundai_jp import climate
 from custom_components.hyundai_jp._api import Vehicle
-from custom_components.hyundai_jp.climate import HyundaiKiaCarClimateControlSwitch
+from custom_components.hyundai_jp.climate import HyundaiBluelinkCarClimateControlSwitch
 
 
 @pytest.fixture(autouse=True)
@@ -30,7 +30,7 @@ def _no_restart_delay(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(climate, "asyncio", MagicMock(sleep=AsyncMock()))
 
 
-def _entity(air_control_is_on: bool) -> HyundaiKiaCarClimateControlSwitch:
+def _entity(air_control_is_on: bool) -> HyundaiBluelinkCarClimateControlSwitch:
     """A climate entity over a vehicle in the given air-control state."""
     vehicle = Vehicle(id="v1", name="test", model="test")
     vehicle.air_control_is_on = air_control_is_on
@@ -44,7 +44,7 @@ def _entity(air_control_is_on: bool) -> HyundaiKiaCarClimateControlSwitch:
     coordinator.async_start_climate = AsyncMock()
     coordinator.async_stop_climate = AsyncMock()
 
-    entity = HyundaiKiaCarClimateControlSwitch(coordinator, vehicle)
+    entity = HyundaiBluelinkCarClimateControlSwitch(coordinator, vehicle)
     entity.hass = MagicMock()
     entity.async_write_ha_state = MagicMock()
     return entity
@@ -125,7 +125,7 @@ async def test_target_temperature_retains_setting_when_air_temp_is_none() -> Non
     coordinator.async_start_climate = AsyncMock()
     coordinator.async_stop_climate = AsyncMock()
 
-    entity = HyundaiKiaCarClimateControlSwitch(coordinator, vehicle)
+    entity = HyundaiBluelinkCarClimateControlSwitch(coordinator, vehicle)
     entity.hass = MagicMock()
     entity.async_write_ha_state = MagicMock()
 
@@ -163,7 +163,7 @@ async def test_coordinator_update_syncs_set_temp_only_when_none() -> None:
     coordinator = MagicMock()
     coordinator.data = {}
 
-    entity = HyundaiKiaCarClimateControlSwitch(coordinator, vehicle)
+    entity = HyundaiBluelinkCarClimateControlSwitch(coordinator, vehicle)
     entity.hass = MagicMock()
     entity.async_write_ha_state = MagicMock()
 

@@ -569,7 +569,7 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         shutdown = self._shutdown_task
         if shutdown is None:
             shutdown = self._shutdown_task = asyncio.create_task(
-                self._async_shutdown_resources(), name="HyundaiJP shutdown"
+                self._async_shutdown_resources(), name="Hyundai Bluelink JP shutdown"
             )
         await self._async_complete_operation(shutdown)
 
