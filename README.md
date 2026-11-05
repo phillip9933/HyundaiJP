@@ -81,6 +81,11 @@ See [the workflows](.github/workflows) for exact checks and release steps.
 
 ## Credits
 
+The HyundaiJP icon is maintained as [an SVG](custom_components/hyundai_jp/brand/icon.svg).
+The 256px and 512px PNG icons are rendered from that source for Home Assistant.
+Its Hyundai emblem comes from [Simple Icons](https://github.com/simple-icons/simple-icons/blob/develop/icons/hyundai.svg)
+under [CC0](https://github.com/simple-icons/simple-icons/blob/develop/LICENSE.md).
+
 Based on [kia_uvo](https://github.com/Hyundai-Kia-Connect/kia_uvo) and
 [hyundai_kia_connect_api](https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api),
 with Japan work continued from
