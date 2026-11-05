@@ -1,0 +1,305 @@
+"""Tests for the diagnostics platform.
+
+Uses real Vehicle() dataclass instances (asdict requires a real dataclass,
+MagicMock is not one) and a mocked coordinator + hass. No HA runtime.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from dataclasses import dataclass
+import datetime
+import json
+import threading
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+import pytest
+
+from custom_components.hyundai_jp import diagnostics as diagnostics_mod
+from custom_components.hyundai_jp._api.Token import Token
+from custom_components.hyundai_jp._api.Vehicle import Vehicle
+from custom_components.hyundai_jp.const import DOMAIN
+from custom_components.hyundai_jp.diagnostics import async_get_config_entry_diagnostics
+from custom_components.hyundai_jp.redact import REDACTED
+
+
+def _make_coordinator(token: Token | None = None) -> MagicMock:
+    vm = MagicMock()
+    vm.api = MagicMock()  # type().__name__ -> "MagicMock"
+    vm.get_local_diagnostics.side_effect = lambda: vm.api.get_local_diagnostics()
+    vm.vehicles = {}
+    vm.token = token
+    coordinator = MagicMock()
+    coordinator.vehicle_manager = vm
+    return coordinator
+
+
+def _make_entry() -> MagicMock:
+    entry = MagicMock()
+    entry.entry_id = "test_entry"
+    entry.unique_id = "test_uid"
+    entry.data = {"region": 10, "brand": 2}
+    entry.options = {
+        "scan_interval": 30,
+        "force_refresh": 1440,
+        "no_force_refresh_hour_start": 22,
+        "no_force_refresh_hour_finish": 7,
+        "enable_geolocation_entity": False,
+        "use_email_with_geocode_api": False,
+    }
+    return entry
+
+
+def _make_hass(coordinator: MagicMock) -> MagicMock:
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"test_uid": coordinator}}
+
+    # Run executor jobs on a real worker thread so the off-event-loop test can
+    # assert thread_id differs from the loop thread.
+    def _async_add_executor_job(fn, *args):
+        loop = asyncio.get_running_loop()
+        return loop.run_in_executor(None, lambda: fn(*args))
+
+    hass.async_add_executor_job = MagicMock(side_effect=_async_add_executor_job)
+    return hass
+
+
+@pytest.fixture(autouse=True)
+def _stub_integration(monkeypatch) -> None:
+    """async_get_integration is imported into diagnostics.py, so patch the
+    module-level reference rather than hass.async_get_integration."""
+
+    async def _fake_async_get_integration(_hass, _domain):
+        integration = MagicMock()
+        integration.version = "3.7.0"
+        return integration
+
+    monkeypatch.setattr(
+        diagnostics_mod, "async_get_integration", _fake_async_get_integration
+    )
+
+
+@pytest.mark.asyncio
+async def test_payload_shape() -> None:
+    token = Token(username="test-user", password="test-pass")
+    token.valid_until = datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
+    token.device_id = "dev123"
+    coordinator = _make_coordinator(token=token)
+    hass = _make_hass(coordinator)
+
+    payload = await async_get_config_entry_diagnostics(hass, _make_entry())
+
+    assert payload["region"] == 10
+    assert payload["brand"] == 2
+    assert payload["api_class"] == "MagicMock"
+    assert payload["integration_version"] == "3.7.0"
+    assert payload["bundled_api_version"] is not None
+    assert payload["vehicle_count"] == 0
+    assert payload["vehicles"] == []
+    assert "local_protocol" not in payload
+    assert "image_rendering" not in payload
+    assert "scan_interval" in payload["config_options"]
+
+
+@pytest.mark.asyncio
+async def test_vehicle_gps_redacted() -> None:
+    vehicle = Vehicle(id="car1")
+    vehicle._location_latitude = 50.06
+    vehicle._location_longitude = 19.92
+    coordinator = _make_coordinator()
+    coordinator.vehicle_manager.vehicles = {"car1": vehicle}
+    hass = _make_hass(coordinator)
+
+    payload = await async_get_config_entry_diagnostics(hass, _make_entry())
+
+    car = payload["vehicles"][0]
+    assert car["vehicle_id"] == "car1"
+    assert car["data"]["_location_latitude"] == REDACTED
+    assert car["data"]["_location_longitude"] == REDACTED
+    # ordinary state survives
+    assert car["data"]["id"] == "car1"
+
+
+@pytest.mark.asyncio
+async def test_token_meta_has_no_secrets() -> None:
+    token = Token(username="test-user", password="test-pass")
+    token.access_token = "secret_access"
+    token.refresh_token = "secret_refresh"
+    token.pin = "1234"
+    token.device_id = "dev123"
+    token.valid_until = datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
+    coordinator = _make_coordinator(token=token)
+    hass = _make_hass(coordinator)
+
+    payload = await async_get_config_entry_diagnostics(hass, _make_entry())
+
+    token_meta = payload["auth"]
+    assert "access_token" not in token_meta
+    assert "refresh_token" not in token_meta
+    assert "pin" not in token_meta
+    assert "device_id" not in token_meta
+    assert token_meta["device_present"] is True
+    assert "valid_until" in token_meta
+
+
+@pytest.mark.asyncio
+async def test_token_meta_none_returns_empty() -> None:
+    coordinator = _make_coordinator(token=None)
+    hass = _make_hass(coordinator)
+
+    payload = await async_get_config_entry_diagnostics(hass, _make_entry())
+
+    assert payload["auth"] == {}
+
+
+@pytest.mark.asyncio
+async def test_config_entry_data_excluded() -> None:
+    coordinator = _make_coordinator()
+    hass = _make_hass(coordinator)
+
+    payload = await async_get_config_entry_diagnostics(hass, _make_entry())
+
+    # entry.data held region/brand only; no credentials leak at top level
+    assert "username" not in payload
+    assert "password" not in payload
+    assert "pin" not in payload
+    assert "auth" in payload  # curated auth metadata dict, not the raw Token
+
+
+@pytest.mark.asyncio
+async def test_config_options_not_redacted() -> None:
+    """Option keys like `use_email_with_geocode_api` contain the `email`
+    substring; whole-payload redaction would scrub a boolean flag. Only the
+    uncontrolled Vehicle data is redacted — constructed top-level fields
+    are left intact.
+    """
+    coordinator = _make_coordinator()
+    hass = _make_hass(coordinator)
+
+    payload = await async_get_config_entry_diagnostics(hass, _make_entry())
+
+    opts = payload["config_options"]
+    assert opts["use_email_with_geocode_api"] is False
+    assert opts["enable_geolocation_entity"] is False
+    assert opts["scan_interval"] == 30
+    assert REDACTED not in str(opts)
+
+
+@pytest.mark.asyncio
+async def test_bundled_version_requires_no_installed_api_package(monkeypatch):
+    from custom_components.hyundai_jp._api import __version__
+
+    payload = await async_get_config_entry_diagnostics(
+        _make_hass(_make_coordinator()), _make_entry()
+    )
+    assert payload["bundled_api_version"] == __version__
+
+
+@pytest.mark.asyncio
+async def test_local_protocol_diagnostics_are_passive_and_off_event_loop() -> None:
+    from custom_components.hyundai_jp._api.KiaUvoApiJP import KiaUvoApiJP
+
+    api = KiaUvoApiJP(region=10, brand=2, language="en")
+    api.session = MagicMock()
+    api._japan_svm_cache = {"SYNTHETIC_PRIVATE_VEHICLE": object()}
+    helper = SimpleNamespace(
+        diagnostics={"messages_received": 2, "last_result": "pending"},
+        client_id="SYNTHETIC_PRIVATE_CLIENT",
+    )
+    api._mqtt_sessions = {
+        "SYNTHETIC_PRIVATE_VEHICLE": (("SYNTHETIC_PRIVATE_TOKEN",), helper)
+    }
+    loop_thread_id = threading.get_ident()
+    seen = []
+    getter = api.get_local_diagnostics
+
+    def local_diagnostics():
+        seen.append(threading.get_ident())
+        return getter()
+
+    api.get_local_diagnostics = local_diagnostics
+    coordinator = _make_coordinator()
+    from custom_components.hyundai_jp.japan_coordinator import (
+        JapanDataUpdateCoordinator,
+    )
+
+    coordinator.__class__ = JapanDataUpdateCoordinator
+    coordinator.vehicle_manager.api = api
+    payload = await async_get_config_entry_diagnostics(
+        _make_hass(coordinator), _make_entry()
+    )
+
+    assert payload["local_protocol"] == {
+        "mqtt_sessions": [{"messages_received": 2, "last_result": "pending"}],
+        "svm_images_cached": 1,
+        "last_command": {},
+        "last_camera_capture": {"stage": "idle"},
+        "last_refresh": {},
+    }
+    assert len(seen) == 1 and seen[0] != loop_thread_id
+    assert "SYNTHETIC_PRIVATE" not in json.dumps(payload)
+    api.session.request.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_broken_vehicle_does_not_kill_dump() -> None:
+    # A non-dataclass instance raises in asdict (dataclasses.asdict requires a
+    # dataclass); the dump isolates the failure to that one vehicle.
+    class NotADataclass:
+        pass
+
+    good = Vehicle(id="good")
+    coordinator = _make_coordinator()
+    coordinator.vehicle_manager.vehicles = {"good": good, "bad": NotADataclass()}
+    hass = _make_hass(coordinator)
+
+    payload = await async_get_config_entry_diagnostics(hass, _make_entry())
+
+    vehicles = {v["vehicle_id"]: v for v in payload["vehicles"]}
+    assert vehicles["good"]["data"]["id"] == "good"
+    assert "error" in vehicles["bad"]
+    assert "data" not in vehicles["bad"]
+
+
+@pytest.mark.asyncio
+async def test_push_identities_redacted_while_protocol_counters_survive() -> None:
+    # Model the new library fields without requiring a release pin change.
+    @dataclass
+    class PushVehicle(Vehicle):
+        mqtt_vehicle_id: str | None = None
+        hu_client_id: str | None = None
+
+    vehicle = PushVehicle(
+        id="car1",
+        mqtt_vehicle_id="synthetic-topic-identity",
+        hu_client_id="synthetic-head-unit-identity",
+    )
+    vehicle.data = {
+        "mqtt": {
+            "clientId": "synthetic-client-identity",
+            "mqtt_registration_uuid": "synthetic-registration-identity",
+            "messages_received": 12,
+            "mqtt_vehicle_id_present": True,
+        }
+    }
+    token = Token(username="test-user", password="test-pass")
+    token.mqtt_client_id = "synthetic-auth-client-identity"
+    coordinator = _make_coordinator(token)
+    coordinator.vehicle_manager.vehicles = {vehicle.id: vehicle}
+    payload = await async_get_config_entry_diagnostics(
+        _make_hass(coordinator), _make_entry()
+    )
+    data = payload["vehicles"][0]["data"]
+    assert data["mqtt_vehicle_id"] == REDACTED
+    assert data["hu_client_id"] == REDACTED
+    assert data["data"]["mqtt"] == {
+        "clientId": REDACTED,
+        "mqtt_registration_uuid": REDACTED,
+        "messages_received": 12,
+        "mqtt_vehicle_id_present": True,
+    }
+    assert payload["auth"]["mqtt_client_id"] == REDACTED
+    assert payload["auth"]["mqtt_client_present"] is True
+    assert payload["auth"]["device_present"] is False
+    assert "synthetic-" not in repr(payload)

@@ -1,0 +1,145 @@
+"""Diagnostics support for HyundaiJP.
+
+Downloadable from Settings > Devices & Services > HyundaiJP > (menu) > Download
+diagnostics. Returns a redacted snapshot of the account's cached state —
+parsed Vehicle data, API class, versions, and curated token metadata — with
+no fresh API calls (the car is not woken). Users attach this JSON to bug
+reports; redaction removes tokens, device id, PIN, and GPS coordinates
+before the dump leaves their Home Assistant instance.
+"""
+
+from __future__ import annotations
+
+from dataclasses import asdict
+from typing import Any
+
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_SCAN_INTERVAL
+from homeassistant.core import HomeAssistant
+from homeassistant.loader import async_get_integration
+
+from ._api import __version__ as api_version
+from .const import (
+    CONF_ENABLE_GEOLOCATION_ENTITY,
+    CONF_FORCE_REFRESH_INTERVAL,
+    CONF_NO_FORCE_REFRESH_HOUR_FINISH,
+    CONF_NO_FORCE_REFRESH_HOUR_START,
+    CONF_USE_EMAIL_WITH_GEOCODE_API,
+    DEFAULT_ENABLE_GEOLOCATION_ENTITY,
+    DEFAULT_FORCE_REFRESH_INTERVAL,
+    DEFAULT_NO_FORCE_REFRESH_HOUR_FINISH,
+    DEFAULT_NO_FORCE_REFRESH_HOUR_START,
+    DEFAULT_SCAN_INTERVAL,
+    DEFAULT_USE_EMAIL_WITH_GEOCODE_API,
+    DOMAIN,
+    HYUNDAI_BRAND,
+    JAPAN_REGION,
+)
+from .japan_coordinator import JapanDataUpdateCoordinator
+from .redact import redact
+
+
+def _token_meta(token: Any) -> dict[str, Any]:
+    """Return a secret-free view of the token.
+
+    Covers expiries, MQTT metadata and device-id presence. The raw
+    access/refresh/control tokens, PIN, and stamp never leave the dump.
+    """
+    if token is None:
+        return {}
+    metadata: dict[str, Any] = redact(
+        {
+            "valid_until": token.valid_until.isoformat() if token.valid_until else None,
+            "ccs_valid_until": (
+                token.ccs_token_valid_until.isoformat()
+                if getattr(token, "ccs_token_valid_until", None)
+                else None
+            ),
+            "control_expiry": getattr(token, "control_token_expiry", 0),
+            "mqtt_client_id": getattr(token, "mqtt_client_id", None),
+            "mqtt_client_present": bool(getattr(token, "mqtt_client_id", None)),
+            "mqtt_broker_host": getattr(token, "mqtt_broker_host", None),
+            "mqtt_broker_port": getattr(token, "mqtt_broker_port", None),
+            "device_present": bool(getattr(token, "device_id", None)),
+        }
+    )
+    return metadata
+
+
+def _config_options(entry: ConfigEntry) -> dict[str, Any]:
+    """Return the effective options (option or default).
+
+    The dump reflects what the integration runs with, not a field of nulls.
+    """
+    return {
+        "scan_interval": entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
+        "force_refresh_interval": entry.options.get(
+            CONF_FORCE_REFRESH_INTERVAL, DEFAULT_FORCE_REFRESH_INTERVAL
+        ),
+        "no_force_refresh_hour_start": entry.options.get(
+            CONF_NO_FORCE_REFRESH_HOUR_START, DEFAULT_NO_FORCE_REFRESH_HOUR_START
+        ),
+        "no_force_refresh_hour_finish": entry.options.get(
+            CONF_NO_FORCE_REFRESH_HOUR_FINISH, DEFAULT_NO_FORCE_REFRESH_HOUR_FINISH
+        ),
+        "enable_geolocation_entity": entry.options.get(
+            CONF_ENABLE_GEOLOCATION_ENTITY, DEFAULT_ENABLE_GEOLOCATION_ENTITY
+        ),
+        "use_email_with_geocode_api": entry.options.get(
+            CONF_USE_EMAIL_WITH_GEOCODE_API, DEFAULT_USE_EMAIL_WITH_GEOCODE_API
+        ),
+    }
+
+
+def _vehicles_payload(
+    coordinator: JapanDataUpdateCoordinator,
+) -> list[dict[str, Any]]:
+    vm = coordinator.vehicle_manager
+    vehicles: list[dict[str, Any]] = []
+    for vehicle_id, vehicle in vm.vehicles.items():
+        try:
+            vehicles.append({"vehicle_id": vehicle_id, "data": asdict(vehicle)})
+        except Exception as exc:
+            vehicles.append(
+                {"vehicle_id": vehicle_id, "error": f"{type(exc).__name__}: {exc}"}
+            )
+    return vehicles
+
+
+async def async_get_config_entry_diagnostics(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> dict[str, Any]:
+    """Return a redacted diagnostics snapshot for this config entry."""
+    # HyundaiJP stores its coordinator under config_entry.unique_id (see
+    # __init__.py async_setup_entry), not entry_id.
+    coordinator: JapanDataUpdateCoordinator = hass.data[DOMAIN][entry.unique_id]
+    vm = coordinator.vehicle_manager
+    integration = await async_get_integration(hass, DOMAIN)
+
+    payload: dict[str, Any] = {
+        "region": JAPAN_REGION,
+        "brand": HYUNDAI_BRAND,
+        "api_class": type(vm.api).__name__,
+        "integration_version": integration.version,
+        "bundled_api_version": api_version,
+        "config_options": _config_options(entry),
+        "auth": _token_meta(vm.token),
+        "vehicle_count": len(vm.vehicles),
+    }
+    # Redact only the uncontrolled Vehicle data (raw asdict: GPS, VIN, geocode
+    # address, region-specific field names). Whole-payload redaction collides
+    # on constructed key names like the "email" in `use_email_with_geocode_api`.
+    vehicles = _vehicles_payload(coordinator)
+    payload["vehicles"] = [redact(v) for v in vehicles]
+    local_diagnostics = vm.get_local_diagnostics
+    if callable(local_diagnostics):
+        summary = await hass.async_add_executor_job(local_diagnostics)
+        if isinstance(summary, dict):
+            payload["local_protocol"] = summary
+    render_summary = coordinator.get_svm_render_diagnostics()
+    if isinstance(render_summary, list):
+        payload["image_rendering"] = render_summary
+    state_summary = coordinator.get_post_command_state_diagnostics()
+    if isinstance(state_summary, list):
+        payload["post_command_state"] = state_summary
+    return payload

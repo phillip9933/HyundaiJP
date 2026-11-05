@@ -1,0 +1,942 @@
+"""ApiImpl.py"""
+
+from collections.abc import Sequence
+from contextlib import ExitStack
+from dataclasses import dataclass
+import datetime as dt
+import logging
+from typing import Any, Protocol
+
+import requests
+from requests.exceptions import JSONDecodeError
+
+from .const import (
+    CHARGE_PORT_ACTION,
+    DISTANCE_UNITS,
+    DOMAIN,
+    GEO_LOCATION_PROVIDERS,
+    GOOGLE,
+    LAMP_MODE,
+    MQTT_PUSH_CONNECTION_STATE,
+    OPENSTREETMAP,
+    ORDER_STATUS,
+    OTP_NOTIFY_TYPE,
+    SEAT_LOCATION,
+    TEMPERATURE_C,
+    TEMPERATURE_F,
+    VALET_MODE_ACTION,
+    VEHICLE_LOCK_ACTION,
+    WINDOW_STATE,
+)
+from .svm import SVMDetails
+from .Token import Token
+from .utils import get_child_value, to_int_enum
+from .Vehicle import Vehicle
+
+try:
+    from geopy.geocoders import GoogleV3
+except ImportError:
+    GoogleV3 = None
+
+_LOGGER = logging.getLogger(__name__)
+
+
+@dataclass
+class ClimateRequestOptions:
+    set_temp: float | None = None
+    duration: int | None = None
+    defrost: bool | None = None
+    climate: bool | None = None
+    heating: int | None = None
+    front_left_seat: int | None = None
+    front_right_seat: int | None = None
+    rear_left_seat: int | None = None
+    rear_right_seat: int | None = None
+    steering_wheel: int | None = None
+    side_rear_mirror_heating: int | None = (
+        None  # 0/1 rear-mirror heating (GSPA sideRearMirrorHeating)
+    )
+    temp_unit: int | None = None  # 0=Celsius, 1=Fahrenheit (mapped to the
+    # string "C"/"F" the GSPA API expects on the wire)
+    hvac_temp_type: int | None = None  # HVAC temp type (GSPA hvacTempType, typically 1)
+    driver_seat_location: SEAT_LOCATION | None = None  # drvSeatLoc override
+
+
+@dataclass
+class WindowRequestOptions:
+    # Universal, position-based vocabulary: front_left/front_right are the
+    # physical front windows (not the seats), back_left/back_right the rear
+    # ones. The GSPA window-curtain endpoint's seat-based body keys
+    # (drvSeatWindow/psgSeatWindow) are derived from these in the API
+    # implementation using drvSeatLoc — callers never touch seat keys.
+    back_left: WINDOW_STATE | None = None
+    back_right: WINDOW_STATE | None = None
+    front_left: WINDOW_STATE | None = None
+    front_right: WINDOW_STATE | None = None
+    rear_left_curtain: WINDOW_STATE | None = None
+    rear_right_curtain: WINDOW_STATE | None = None
+    driver_seat_location: SEAT_LOCATION | None = None  # drvSeatLoc override
+
+    def __post_init__(self) -> None:
+        """Convert string/int values to WINDOW_STATE enums."""
+        self.back_left = to_int_enum(WINDOW_STATE, self.back_left)
+        self.back_right = to_int_enum(WINDOW_STATE, self.back_right)
+        self.front_left = to_int_enum(WINDOW_STATE, self.front_left)
+        self.front_right = to_int_enum(WINDOW_STATE, self.front_right)
+        self.rear_left_curtain = to_int_enum(WINDOW_STATE, self.rear_left_curtain)
+        self.rear_right_curtain = to_int_enum(WINDOW_STATE, self.rear_right_curtain)
+
+
+@dataclass
+class OTPRequest:
+    request_id: str | None
+    otp_key: str | None
+    has_email: bool | None
+    has_sms: bool | None
+    email: str | None
+    sms: str | None
+
+
+@dataclass
+class ScheduleChargingClimateRequestOptions:
+    """Options for scheduled charging and climate writes.
+
+    ``None`` on any field means "leave unchanged": the library resolves it
+    from the vehicle's current settings. An explicit value (including
+    ``False``) is written to the car. On the flat EV5 path a scope with all
+    fields ``None`` skips its endpoint entirely; the combined
+    ``/reservation/chargehvac`` path always sends both scopes.
+    """
+
+    @dataclass
+    class DepartureOptions:
+        """Per-departure schedule options; climate fields override top-level defaults on platforms with per-slot HVAC (see #1302)."""
+
+        enabled: bool | None = None
+        days: list[int] | None = None  # Sun=0, Mon=1, ..., Sat=6
+        time: dt.time | None = None
+        climate_enabled: bool | None = None
+        temperature: float | None = None
+        defrost: bool | None = None
+
+    first_departure: DepartureOptions | None = None
+    second_departure: DepartureOptions | None = None
+    charging_enabled: bool | None = None
+    off_peak_start_time: dt.time | None = None
+    off_peak_end_time: dt.time | None = None
+    off_peak_charge_only_enabled: bool | None = None
+    climate_enabled: bool | None = None
+    temperature: float | None = None
+    # Deprecated (no-op): the temperature unit is always resolved from the
+    # vehicle's reported settings. The field is kept for backward
+    # compatibility with callers that still pass it and will be removed in a
+    # future version (#1303 review).
+    temperature_unit: int | None = None
+    defrost: bool | None = None
+
+    @classmethod
+    def from_vehicle(cls, vehicle: Vehicle) -> ScheduleChargingClimateRequestOptions:
+        """Options representing the vehicle's current schedule settings.
+
+        Unknown vehicle state falls back to the documented defaults
+        (with warnings) — see ``_fill_schedule_options_from_vehicle``.
+        """
+        options = cls()
+        _fill_schedule_options_from_vehicle(
+            options, vehicle, scopes=("charge", "climate")
+        )
+        return options
+
+
+def _schedule_charging_scopes(
+    options: ScheduleChargingClimateRequestOptions,
+) -> tuple[bool, bool]:
+    """Return (charge_scope_active, climate_scope_active) from raw options.
+
+    A scope is active when at least one of its fields was explicitly provided
+    (not None). Departures count toward the climate scope.
+    """
+    charge_active = any(
+        value is not None
+        for value in (
+            options.charging_enabled,
+            options.off_peak_start_time,
+            options.off_peak_end_time,
+            options.off_peak_charge_only_enabled,
+        )
+    )
+
+    climate_active = (
+        any(
+            value is not None
+            for value in (
+                options.climate_enabled,
+                options.temperature,
+                options.defrost,
+            )
+        )
+        or options.first_departure is not None
+        or options.second_departure is not None
+    )
+    return charge_active, climate_active
+
+
+def _vehicle_temperature_unit(vehicle: Vehicle) -> int | None:
+    """Wire temperature unit (0=°C, 1=°F) from the vehicle's reported setting.
+
+    ``None`` when the vehicle does not report a departure-climate unit.
+    """
+    unit_map = {TEMPERATURE_C: 0, TEMPERATURE_F: 1}
+    source_unit = vehicle.ev_first_departure_climate_temperature_unit
+    if source_unit in unit_map:
+        return unit_map[source_unit]
+    return None
+
+
+def _guard_schedule_temperature(
+    options: ScheduleChargingClimateRequestOptions, vehicle: Vehicle
+) -> None:
+    """Refuse to write the climate scope with an unresolvable temperature.
+
+    The apps keep the car's stored temperature when writing the schedule, but
+    the payload always carries ``airTemp``. When neither the caller nor the
+    vehicle provides a temperature, writing the documented default (21 °C)
+    would silently reset the car's setting — so raise instead (Lekensteyn,
+    #1303 review).
+    """
+    has_temp = (
+        options.temperature is not None
+        or (
+            options.first_departure is not None
+            and options.first_departure.temperature is not None
+        )
+        or (
+            options.second_departure is not None
+            and options.second_departure.temperature is not None
+        )
+        or vehicle.ev_first_departure_climate_temperature is not None
+        or vehicle.ev_second_departure_climate_temperature is not None
+    )
+    if not has_temp:
+        raise ValueError(
+            f"{DOMAIN} - {vehicle.id}: vehicle does not report the departure "
+            "climate temperature; pass an explicit temperature to avoid "
+            "resetting the vehicle's setting"
+        )
+
+
+def _fill_option_value[T](
+    current: T | None,
+    source: T | None,
+    default: T,
+    label: str,
+    missing: list[str],
+) -> T:
+    """None = leave unchanged: explicit value, else vehicle value, else default.
+
+    Falls back to ``default`` and records ``label`` in ``missing`` when the
+    vehicle does not report the value (the caller warns once for all of them).
+    """
+    if current is not None:
+        return current
+    if source is not None:
+        return source
+    missing.append(label)
+    return default
+
+
+def _fill_departure_options(
+    departure: ScheduleChargingClimateRequestOptions.DepartureOptions,
+    vehicle: Vehicle,
+    number: int,
+    *,
+    fallback_climate_enabled: bool | None = None,
+    fallback_temperature: float | None = None,
+    fallback_defrost: bool | None = None,
+    missing: list[str],
+) -> None:
+    """Fill a departure's None fields from the matching vehicle state."""
+    if number == 1:
+        v_enabled = vehicle.ev_first_departure_enabled
+        v_days = vehicle.ev_first_departure_days
+        v_time = vehicle.ev_first_departure_time
+        v_climate = vehicle.ev_first_departure_climate_enabled
+        v_temp = vehicle.ev_first_departure_climate_temperature
+        v_defrost = vehicle.ev_first_departure_climate_defrost
+        prefix = "first_departure"
+    else:
+        v_enabled = vehicle.ev_second_departure_enabled
+        v_days = vehicle.ev_second_departure_days
+        v_time = vehicle.ev_second_departure_time
+        v_climate = vehicle.ev_second_departure_climate_enabled
+        v_temp = vehicle.ev_second_departure_climate_temperature
+        v_defrost = vehicle.ev_second_departure_climate_defrost
+        prefix = "second_departure"
+    departure.enabled = _fill_option_value(
+        departure.enabled, v_enabled, False, f"{prefix}.enabled", missing
+    )
+    # Default is the [9] "no days selected" sentinel, not [0]: in the apps a
+    # departure without repeat days carries day 9 (NOT_SELECTED_DAY), and [0]
+    # would select Sunday instead (Lekensteyn, #1303 review — confirmed in the
+    # apps' payload round-trip).
+    departure.days = _fill_option_value(
+        departure.days, v_days, [9], f"{prefix}.days", missing
+    )
+    # The apps normalize an empty day selection to the same [9] sentinel
+    # rather than sending an empty list.
+    if departure.days == []:
+        departure.days = [9]
+    departure.time = _fill_option_value(
+        departure.time, v_time, dt.time(), f"{prefix}.time", missing
+    )
+    curr_climate = (
+        departure.climate_enabled
+        if departure.climate_enabled is not None
+        else fallback_climate_enabled
+    )
+    departure.climate_enabled = _fill_option_value(
+        curr_climate, v_climate, False, f"{prefix}.climate_enabled", missing
+    )
+    curr_temp = (
+        departure.temperature
+        if departure.temperature is not None
+        else fallback_temperature
+    )
+    departure.temperature = _fill_option_value(
+        curr_temp, v_temp, 21.0, f"{prefix}.temperature", missing
+    )
+    curr_defrost = (
+        departure.defrost if departure.defrost is not None else fallback_defrost
+    )
+    departure.defrost = _fill_option_value(
+        curr_defrost, v_defrost, False, f"{prefix}.defrost", missing
+    )
+
+
+def _fill_schedule_options_from_vehicle(
+    options: ScheduleChargingClimateRequestOptions,
+    vehicle: Vehicle,
+    *,
+    scopes: tuple[str, ...],
+) -> None:
+    """Fill None option fields with the vehicle's current settings.
+
+    Implements "None = leave unchanged": fields already set are preserved,
+    unset fields take the vehicle's reported value, and unknown vehicle state
+    falls back to the documented default (so a known value is never silently
+    reset). Only the requested scopes are filled; an inactive scope is
+    skipped (its endpoint is not called). Missing vehicle state is reported
+    with a single warning listing all affected options.
+
+    Region coverage: departure-climate fields are currently only reported by
+    the Kia EU API; charge/off-peak fields are reported by Kia EU, AU, CN and
+    the shared CCS2 status parser. For other regions the defaults apply.
+    """
+    missing: list[str] = []
+    if "charge" in scopes:
+        options.charging_enabled = _fill_option_value(
+            options.charging_enabled,
+            vehicle.ev_schedule_charge_enabled,
+            False,
+            "charging_enabled",
+            missing,
+        )
+        options.off_peak_start_time = _fill_option_value(
+            options.off_peak_start_time,
+            vehicle.ev_off_peak_start_time,
+            dt.time(),
+            "off_peak_start_time",
+            missing,
+        )
+        options.off_peak_end_time = _fill_option_value(
+            options.off_peak_end_time,
+            vehicle.ev_off_peak_end_time,
+            dt.time(),
+            "off_peak_end_time",
+            missing,
+        )
+        options.off_peak_charge_only_enabled = _fill_option_value(
+            options.off_peak_charge_only_enabled,
+            vehicle.ev_off_peak_charge_only_enabled,
+            False,
+            "off_peak_charge_only_enabled",
+            missing,
+        )
+    if "climate" in scopes:
+        for number, departure in (
+            (1, options.first_departure),
+            (2, options.second_departure),
+        ):
+            if departure is None:
+                departure = ScheduleChargingClimateRequestOptions.DepartureOptions()
+                if number == 1:
+                    options.first_departure = departure
+                else:
+                    options.second_departure = departure
+            _fill_departure_options(
+                departure,
+                vehicle,
+                number,
+                fallback_climate_enabled=options.climate_enabled,
+                fallback_temperature=options.temperature,
+                fallback_defrost=options.defrost,
+                missing=missing,
+            )
+        # Mirror first departure climate fields to top-level for backward compatibility
+        assert options.first_departure is not None  # filled in by the loop above
+        if options.climate_enabled is None:
+            options.climate_enabled = options.first_departure.climate_enabled
+        if options.temperature is None:
+            options.temperature = options.first_departure.temperature
+        if options.defrost is None:
+            options.defrost = options.first_departure.defrost
+    if missing:
+        _LOGGER.warning(
+            f"{DOMAIN} - {vehicle.id}: schedule options not reported by "
+            f"vehicle; using defaults for: {', '.join(missing)}"
+        )
+
+
+@dataclass
+class POICoord:
+    lat: float | None = None
+    lon: float | None = None
+    alt: int = 0
+    type: int = 0
+
+
+@dataclass
+class POIInfo:
+    phone: str = ""
+    waypoint_id: int = 1
+    lang: int = 1
+    src: str = "HERE"
+    coord: POICoord | None = None
+    addr: str = ""
+    zip: str = ""
+    place_id: str = ""
+    name: str = ""
+
+    def to_dict(self) -> dict[str, object]:
+        coord = self.coord or POICoord()
+        return {
+            "phone": self.phone,
+            "waypointID": self.waypoint_id,
+            "lang": self.lang,
+            "src": self.src,
+            "coord": {
+                "lat": coord.lat,
+                "alt": coord.alt,
+                "lon": coord.lon,
+                "type": coord.type,
+            },
+            "addr": self.addr,
+            "zip": self.zip,
+            "placeid": self.place_id,
+            "name": self.name,
+        }
+
+
+class ApiImplSession(requests.Session):
+    """Shared HTTP session with default timeout and connection pooling.
+
+    Japan requests use bounded connect/read timeouts. Vehicle commands are
+    never automatically replayed because a timeout can have an unknown outcome.
+    """
+
+    HTTP_CONNECT_TIMEOUT = 10
+    HTTP_READ_TIMEOUT = 30
+
+    def request(
+        self, method: str | bytes, url: str | bytes, *args: Any, **kwargs: Any
+    ) -> requests.Response:
+        kwargs.setdefault(
+            "timeout", (self.HTTP_CONNECT_TIMEOUT, self.HTTP_READ_TIMEOUT)
+        )
+        try:
+            return super().request(
+                method.decode("ascii") if isinstance(method, bytes) else method,
+                url,
+                *args,
+                **kwargs,
+            )
+        except requests.exceptions.Timeout as exc:
+            from .exceptions import RequestTimeoutError
+
+            raise RequestTimeoutError(str(exc)) from exc
+
+
+class PushProvider(Protocol):
+    """Region or vehicle-scoped Service Hub registration and message parsing."""
+
+    def get_push_broker_info(self, token: Token) -> dict[str, Any] | None: ...
+    def register_push_client(self, token: Token) -> dict[str, Any] | None: ...
+    def register_push_vehicle(
+        self, token: Token, vehicle: Vehicle
+    ) -> dict[str, Any] | None: ...
+    def get_push_vehicle_identity(
+        self, token: Token, vehicle: Vehicle
+    ) -> dict[str, Any] | None: ...
+    def get_push_connection_state(
+        self, token: Token
+    ) -> MQTT_PUSH_CONNECTION_STATE | None: ...
+    def get_push_topics(self, token: Token, vehicle: Vehicle) -> list[str]: ...
+    def parse_push_message(self, topic: str, payload: bytes) -> Any: ...
+    def get_push_credentials(self, token: Token) -> tuple[str, str] | None: ...
+
+
+class ApiImpl:
+    # None preserves consumers that allow all existing regional commands.
+    supported_commands: frozenset[str] | None = None
+
+    data_timezone: dt.tzinfo = dt.UTC
+    temperature_range: Sequence[float] | None = None
+    previous_latitude: float | None = None
+    previous_longitude: float | None = None
+
+    def __init__(self) -> None:
+        """Initialize."""
+
+    def close(self) -> None:
+        """Release adapter-owned HTTP sessions; safe to repeat."""
+        seen: set[int] = set()
+        with ExitStack() as cleanup:
+            for name in ("session", "_service_hub_session", "_sessions"):
+                session = vars(self).get(name)
+                if isinstance(session, requests.Session) and id(session) not in seen:
+                    seen.add(id(session))
+                    cleanup.callback(session.close)
+
+    def login(
+        self,
+        username: str,
+        password: str,
+        pin: str | None = None,
+    ) -> Token | OTPRequest:
+        """Login into cloud endpoints and return Token or OTP Details if OTP is triggered"""
+        raise NotImplementedError("login is not implemented for this region")
+
+    def send_otp(self, otp_request: OTPRequest, notify_type: OTP_NOTIFY_TYPE) -> None:
+        """Sends OTP to the user via selected destination and via"""
+        raise NotImplementedError("send_otp is not implemented for this region")
+
+    def verify_otp_and_complete_login(
+        self,
+        username: str,
+        password: str,
+        otp_code: str,
+        otp_request: OTPRequest,
+        pin: str | None = None,
+    ) -> Token:
+        """Confirms OTP code sent to the user"""
+        raise NotImplementedError(
+            "verify_otp_and_complete_login is not implemented for this region"
+        )
+
+    def get_vehicles(self, token: Token) -> list[Vehicle]:
+        """Return all Vehicle instances for a given Token"""
+        raise NotImplementedError("get_vehicles is not implemented for this region")
+
+    def refresh_vehicles(self, token: Token, vehicles: dict[str, Vehicle]) -> None:
+        """Refresh the vehicle data provided in get_vehicles.
+        Required for Kia USA as key is session specific"""
+        return
+
+    def update_vehicle_with_cached_state(self, token: Token, vehicle: Vehicle) -> None:
+        """Get cached vehicle data and update Vehicle instance with it"""
+        raise NotImplementedError(
+            "update_vehicle_with_cached_state is not implemented for this region"
+        )
+
+    def get_local_diagnostics(self) -> dict[str, Any]:
+        """Return local protocol diagnostics without I/O or private identifiers."""
+        return {}
+
+    def apply_cached_mqtt_state(self, vehicle: Vehicle) -> bool:
+        """Apply already-received state without I/O; return whether it changed."""
+        return False
+
+    def test_token(self, token: Token) -> bool:
+        """Test if token is valid
+        Use any dummy request to test if token is still valid"""
+        return True
+
+    def get_push_provider(self, token: Token, vehicle: Vehicle) -> PushProvider:
+        """Select the push provider; existing regions keep their API instance."""
+        return self
+
+    # Push contract — regions that support push override these
+    # (today: the CCI/EU lineage).
+
+    def get_push_broker_info(self, token: Token) -> dict[str, Any] | None:
+        """MQTT broker config for this region's push infrastructure."""
+        raise NotImplementedError(
+            "get_push_broker_info is not implemented for this region"
+        )
+
+    def register_push_client(self, token: Token) -> dict[str, Any] | None:
+        """Register the device/client with the push infrastructure."""
+        raise NotImplementedError(
+            "register_push_client is not implemented for this region"
+        )
+
+    def register_push_vehicle(
+        self, token: Token, vehicle: Vehicle
+    ) -> dict[str, Any] | None:
+        """Register this vehicle's protocols with the push infrastructure."""
+        raise NotImplementedError(
+            "register_push_vehicle is not implemented for this region"
+        )
+
+    def get_push_vehicle_identity(
+        self, token: Token, vehicle: Vehicle
+    ) -> dict[str, Any] | None:
+        """Fetch the vehicle push identity (metadata + push vehicle id)."""
+        raise NotImplementedError(
+            "get_push_vehicle_identity is not implemented for this region"
+        )
+
+    def get_push_connection_state(
+        self, token: Token
+    ) -> MQTT_PUSH_CONNECTION_STATE | None:
+        """Push broker connection state (MQTT_PUSH_CONNECTION_STATE)."""
+        raise NotImplementedError(
+            "get_push_connection_state is not implemented for this region"
+        )
+
+    def get_push_topics(self, token: Token, vehicle: Vehicle) -> list[str]:
+        """Topics to subscribe for this vehicle."""
+        raise NotImplementedError("get_push_topics is not implemented for this region")
+
+    def parse_push_message(self, topic: str, payload: bytes) -> Any:
+        """Parse a raw push delivery into the push-message shape.
+
+        Parse result is duck-typed with these attributes: topic_group,
+        topic_type, vehicle_id (push-level vehicle id), payload (dict),
+        is_status (bool). None = unknown topic schema.
+        """
+        raise NotImplementedError(
+            "parse_push_message is not implemented for this region"
+        )
+
+    def get_push_credentials(self, token: Token) -> tuple[str, str] | None:
+        """Broker credentials for the MQTT connect; None = connect unauthenticated."""
+        raise NotImplementedError(
+            "get_push_credentials is not implemented for this region"
+        )
+
+    def check_action_status(
+        self,
+        token: Token,
+        vehicle: Vehicle,
+        action_id: str,
+        synchronous: bool = False,
+        timeout: int = 0,
+    ) -> ORDER_STATUS:
+        """Return the status of a previously sent remote command"""
+        raise NotImplementedError(
+            "check_action_status is not implemented for this region"
+        )
+
+    def force_refresh_vehicle_state(self, token: Token, vehicle: Vehicle) -> None:
+        """Triggers the system to contact the car and get fresh data"""
+        raise NotImplementedError(
+            "force_refresh_vehicle_state is not implemented for this region"
+        )
+
+    def update_geocoded_location(
+        self,
+        token: Token,
+        vehicle: Vehicle,
+        use_email: bool,
+        provider: int = 1,
+        API_KEY: str | None = None,
+    ) -> None:
+        if vehicle.location_latitude and vehicle.location_longitude:
+            if (
+                vehicle.geocode
+                and vehicle.location_latitude == self.previous_latitude
+                and vehicle.location_longitude == self.previous_longitude
+            ):  # previous coordinates are the same, so keep last valid vehicle.geocode
+                _LOGGER.debug(f"{DOMAIN} - Keeping last geocode location")
+            elif GEO_LOCATION_PROVIDERS[provider] == OPENSTREETMAP:
+                email_parameter = ""
+                if use_email is True:
+                    email_parameter = "&email=" + token.username
+
+                url = (
+                    "https://nominatim.openstreetmap.org/reverse?lat="
+                    + str(vehicle.location_latitude)
+                    + "&lon="
+                    + str(vehicle.location_longitude)
+                    + "&format=json&addressdetails=1&zoom=18"
+                    + email_parameter
+                )
+                headers = {"user-agent": "curl/7.81.0"}
+                response = requests.get(url, headers=headers, timeout=(5, 15))
+                try:
+                    response = response.json()
+                except JSONDecodeError:
+                    _LOGGER.warning(f"{DOMAIN} - failed geocode openstreetmap")
+                    vehicle.geocode = None
+                else:
+                    vehicle.geocode = (
+                        get_child_value(response, "display_name"),
+                        get_child_value(response, "address"),
+                    )
+                    self.previous_latitude = vehicle.location_latitude
+                    self.previous_longitude = vehicle.location_longitude
+                    _LOGGER.debug(f"{DOMAIN} - geocode openstreetmap")
+            elif GEO_LOCATION_PROVIDERS[provider] == GOOGLE:
+                if not API_KEY:
+                    _LOGGER.warning(f"{DOMAIN} - missing API KEY for geocode Google")
+                    vehicle.geocode = None
+                elif GoogleV3 is None:
+                    _LOGGER.warning(f"{DOMAIN} - geopy is required for geocode Google")
+                    vehicle.geocode = None
+                else:
+                    latlong = (vehicle.location_latitude, vehicle.location_longitude)
+                    try:
+                        geolocator = GoogleV3(api_key=API_KEY)
+                        locations = geolocator.reverse(latlong)
+                        if locations:
+                            vehicle.geocode = locations
+                            self.previous_latitude = vehicle.location_latitude
+                            self.previous_longitude = vehicle.location_longitude
+                            _LOGGER.debug(f"{DOMAIN} - geocode google")
+                    except Exception as ex:
+                        _LOGGER.warning(f"{DOMAIN} - failed geocode Google: {ex}")
+                        vehicle.geocode = None
+
+    def lock_action(
+        self, token: Token, vehicle: Vehicle, action: VEHICLE_LOCK_ACTION
+    ) -> str | None:
+        """Lock or unlocks a vehicle.  Returns the tracking ID"""
+        raise NotImplementedError("lock_action is not implemented for this region")
+
+    def start_climate(
+        self, token: Token, vehicle: Vehicle, options: ClimateRequestOptions
+    ) -> str | None:
+        """Starts climate or remote start.  Returns the tracking ID"""
+        raise NotImplementedError("start_climate is not implemented for this region")
+
+    def stop_climate(self, token: Token, vehicle: Vehicle) -> str | None:
+        """Stops climate or remote start.  Returns the tracking ID"""
+        raise NotImplementedError("stop_climate is not implemented for this region")
+
+    def start_pet_care(
+        self,
+        token: Token,
+        vehicle: Vehicle,
+        options: ClimateRequestOptions | None = None,
+    ) -> str:
+        raise NotImplementedError("start_pet_care is not implemented for this region")
+
+    def stop_pet_care(self, token: Token, vehicle: Vehicle) -> str:
+        raise NotImplementedError("stop_pet_care is not implemented for this region")
+
+    def start_battery_conditioning(self, token: Token, vehicle: Vehicle) -> str:
+        raise NotImplementedError(
+            "start_battery_conditioning is not implemented for this region"
+        )
+
+    def stop_battery_conditioning(self, token: Token, vehicle: Vehicle) -> str:
+        raise NotImplementedError(
+            "stop_battery_conditioning is not implemented for this region"
+        )
+
+    def start_charge(self, token: Token, vehicle: Vehicle) -> str | None:
+        """Starts charge. Returns the tracking ID"""
+        raise NotImplementedError("start_charge is not implemented for this region")
+
+    def stop_charge(self, token: Token, vehicle: Vehicle) -> str | None:
+        """Stops charge. Returns the tracking ID"""
+        raise NotImplementedError("stop_charge is not implemented for this region")
+
+    def set_charge_limits(
+        self, token: Token, vehicle: Vehicle, ac: int, dc: int
+    ) -> str | None:
+        """Sets charge limits. Returns the tracking ID"""
+        raise NotImplementedError(
+            "set_charge_limits is not implemented for this region"
+        )
+
+    def set_charging_current(self, token: Token, vehicle: Vehicle, level: int) -> str:
+        """
+        feature only available for some regions.
+        Sets charge current level (1=100%, 2=90%, 3=60%). Returns the tracking ID
+        """
+        raise NotImplementedError(
+            "set_charging_current is not implemented for this region"
+        )
+
+    def _get_drv_seat_loc(self, vehicle: Vehicle) -> SEAT_LOCATION:
+        """Return the driver seat location for drvSeatLoc payloads.
+
+        "L" for LHD (left-hand drive), "R" for RHD (right-hand drive).
+        Derived from the vehicle's reported odometer unit: mile-based markets
+        (UK, Ireland) are RHD, kilometre-based markets are LHD.
+
+        This base implementation covers EU and CN. RHD regions that use
+        kilometres (AU, IN) override this method to return SEAT_LOCATION.RIGHT
+        directly, because the km/miles signal would incorrectly resolve to
+        LEFT.
+
+        Falls back to LEFT when the odometer unit is unavailable (e.g. the
+        cached state response did not include it), which is correct for the
+        LHD majority of EU/CN markets.
+        """
+        if vehicle.odometer_unit in (DISTANCE_UNITS[2], DISTANCE_UNITS[3]):
+            return SEAT_LOCATION.RIGHT
+        return SEAT_LOCATION.LEFT
+
+    def set_windows_state(
+        self, token: Token, vehicle: Vehicle, options: WindowRequestOptions
+    ) -> str:
+        """Opens or closes a particular window. Returns the tracking ID"""
+        raise NotImplementedError(
+            "set_windows_state is not implemented for this region"
+        )
+
+    def charge_port_action(
+        self, token: Token, vehicle: Vehicle, action: CHARGE_PORT_ACTION
+    ) -> str:
+        """Opens or closes the charging port of the car. Returns the tracking ID"""
+        raise NotImplementedError(
+            "charge_port_action is not implemented for this region"
+        )
+
+    def update_month_trip_info(
+        self, token: Token, vehicle: Vehicle, yyyymm_string: str
+    ) -> None:
+        """
+        feature only available for some regions.
+        Updates the vehicle.month_trip_info for the specified month.
+
+        Default this information is None:
+
+        month_trip_info: MonthTripInfo = None
+        """
+        raise NotImplementedError(
+            "update_month_trip_info is not implemented for this region"
+        )
+
+    def update_day_trip_info(
+        self, token: Token, vehicle: Vehicle, yyyymmdd_string: str
+    ) -> None:
+        """
+        feature only available for some regions.
+        Updates the vehicle.day_trip_info information for the specified day.
+
+        Default this information is None:
+
+        day_trip_info: DayTripInfo = None
+        """
+        raise NotImplementedError(
+            "update_day_trip_info is not implemented for this region"
+        )
+
+    def schedule_charging_and_climate(
+        self,
+        token: Token,
+        vehicle: Vehicle,
+        options: ScheduleChargingClimateRequestOptions,
+    ) -> str:
+        """
+        feature only available for some regions.
+        Schedule charging and climate control. Returns the tracking ID
+        """
+        raise NotImplementedError(
+            "schedule_charging_and_climate is not implemented for this region"
+        )
+
+    def start_hazard_lights(self, token: Token, vehicle: Vehicle) -> str | None:
+        """Turns on the hazard lights for 30 seconds"""
+        raise NotImplementedError(
+            "start_hazard_lights is not implemented for this region"
+        )
+
+    def start_hazard_lights_and_horn(
+        self, token: Token, vehicle: Vehicle
+    ) -> str | None:
+        """Turns on the hazard lights and horn for 30 seconds"""
+        raise NotImplementedError(
+            "start_hazard_lights_and_horn is not implemented for this region"
+        )
+
+    def door_power_off(self, token: Token, vehicle: Vehicle) -> str:
+        raise NotImplementedError("door_power_off is not implemented for this region")
+
+    def open_frunk(self, token: Token, vehicle: Vehicle) -> str:
+        raise NotImplementedError("open_frunk is not implemented for this region")
+
+    def turn_off_lamp(
+        self, token: Token, vehicle: Vehicle, mode: LAMP_MODE = LAMP_MODE.ALL_OFF
+    ) -> str:
+        raise NotImplementedError("turn_off_lamp is not implemented for this region")
+
+    def stop_rear_seat_alarm(self, token: Token, vehicle: Vehicle) -> str:
+        raise NotImplementedError(
+            "stop_rear_seat_alarm is not implemented for this region"
+        )
+
+    def set_charge_alarm(self, token: Token, vehicle: Vehicle, enabled: bool) -> str:
+        raise NotImplementedError("set_charge_alarm is not implemented for this region")
+
+    def valet_mode_action(
+        self, token: Token, vehicle: Vehicle, action: VALET_MODE_ACTION
+    ) -> str:
+        """
+        feature only available for some regions.
+        Activate or Deactivate valet mode. Returns the tracking ID
+        """
+        raise NotImplementedError(
+            "valet_mode_action is not implemented for this region"
+        )
+
+    def set_vehicle_to_load_discharge_limit(
+        self, token: Token, vehicle: Vehicle, limit: int
+    ) -> str:
+        """
+        feature only available for some regions.
+        Set the vehicle to load limit. Returns the tracking ID
+        """
+        raise NotImplementedError(
+            "set_vehicle_to_load_discharge_limit is not implemented for this region"
+        )
+
+    def start_ota_update(
+        self, token: Token, vehicle: Vehicle, start: bool
+    ) -> dict[str, Any]:
+        raise NotImplementedError("start_ota_update is not implemented for this region")
+
+    def set_navigation(
+        self, token: Token, vehicle: Vehicle, poi_list: list[POIInfo]
+    ) -> str:
+        """Send navigation destinations to the vehicle. Returns the tracking ID."""
+        raise NotImplementedError("set_navigation is not implemented for this region")
+
+    def refresh_access_token(self, token: Token) -> Token | OTPRequest:
+        """Refresh the token using the refresh token"""
+        # By default, just call login again, ideally use the refresh token flow
+        # Pass the pin explicitly as a keyword to avoid positional
+        # argument mis-binding in subclasses that accept different
+        # login() signatures (some accept a `token` positional arg).
+        return self.login(
+            username=token.username, password=token.password, pin=token.pin
+        )
+
+    def get_svm_details(self, token: Token, vehicle: Vehicle) -> SVMDetails:
+        """Return the latest SVM composite image and metadata."""
+        raise NotImplementedError("get_svm_details is not implemented for this region")
+
+    def request_svm_capture(
+        self,
+        token: Token,
+        vehicle: Vehicle,
+        acknowledged_warning: bool = False,
+    ) -> SVMDetails:
+        """Trigger a fresh SVM capture and return the resulting image."""
+        raise NotImplementedError(
+            "request_svm_capture is not implemented for this region"
+        )

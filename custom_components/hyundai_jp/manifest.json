@@ -1,0 +1,22 @@
+{
+  "domain": "hyundai_jp",
+  "name": "HyundaiJP",
+  "codeowners": [
+    "@phillip9933"
+  ],
+  "config_flow": true,
+  "documentation": "https://github.com/phillip9933/HyundaiJP",
+  "integration_type": "hub",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/phillip9933/HyundaiJP/issues",
+  "loggers": [
+    "custom_components.hyundai_jp"
+  ],
+  "requirements": [
+    "requests==2.34.2",
+    "paho-mqtt==2.1.0",
+    "Pillow==12.3.0",
+    "numpy==2.5.4"
+  ],
+  "version": "0.1.0b1"
+}

@@ -1,0 +1,547 @@
+"""VehicleManager.py"""
+
+from collections.abc import Callable
+import datetime as dt
+from datetime import timedelta
+import logging
+from threading import RLock
+from typing import Any
+
+from .ApiImpl import (
+    ApiImpl,
+    ClimateRequestOptions,
+    POIInfo,
+    ScheduleChargingClimateRequestOptions,
+    WindowRequestOptions,
+)
+from .const import (
+    CHARGE_PORT_ACTION,
+    DOMAIN,
+    LAMP_MODE,
+    MQTT_PUSH_CONNECTION_STATE,
+    ORDER_STATUS,
+    VALET_MODE_ACTION,
+    VEHICLE_LOCK_ACTION,
+)
+from .exceptions import APIError, AuthenticationError
+from .KiaUvoApiJP import KiaUvoApiJP
+from .mqtt_push_session import MqttPushSession
+from .svm import SVMDetails
+from .Token import Token
+from .Vehicle import Vehicle
+
+_LOGGER = logging.getLogger(__name__)
+
+
+class VehicleManager:
+    def __init__(
+        self,
+        region: int,
+        brand: int,
+        username: str,
+        password: str,
+        pin: str,
+        geocode_api_enable: bool = False,
+        geocode_api_use_email: bool = False,
+        geocode_provider: int = 1,
+        geocode_api_key: str | None = None,
+        token: Token | None = None,
+        language: str = "en",
+    ):
+        self.region: int = region
+        self.brand: int = brand
+        self.username: str = username
+        self.password: str = password
+        self.geocode_api_enable: bool = geocode_api_enable
+        self.geocode_api_use_email: bool = geocode_api_use_email
+        self.geocode_provider: int = geocode_provider
+        self.pin: str = pin
+        self.language: str = language
+        self.geocode_api_key: str | None = geocode_api_key
+
+        self.api: ApiImpl = self.get_implementation_by_region_brand(
+            self.region, self.brand, self.language
+        )
+
+        self.token: Token | None = token
+        self.vehicles: dict[str, Vehicle] = {}
+        # Connection-scoped state; vehicle push identity lives on Vehicle.
+        self._push_session: MqttPushSession | None = None
+        self._push_status_callback: Callable[[str, str], None] | None = None
+        self._push_connection_change_callback: Callable[[bool], None] | None = None
+        self._lifecycle_lock = RLock()
+        self._closed = False
+
+    def close(self) -> None:
+        """Stop push delivery before releasing the adapter's resources."""
+        with self._lifecycle_lock:
+            if self._closed:
+                return
+            self._closed = True
+        try:
+            if self._push_session is not None:
+                self._push_session.close()
+        finally:
+            self.api.close()
+
+    def login(self) -> bool:
+        """Sign in and initialize Japan vehicles when a token is returned."""
+        result = self.api.login(
+            username=self.username,
+            password=self.password,
+            pin=self.pin,
+        )
+        if isinstance(result, Token):
+            self.token = result
+            self.initialize_vehicles()
+            return True
+        return False
+
+    def get_token(self) -> Token:
+        """Return an authenticated token; never submit a request before login."""
+        if self.token is None:
+            raise AuthenticationError("Sign in to HyundaiJP first")
+        return self.token
+
+    def initialize_vehicles(self) -> None:
+        if len(self.vehicles) > 0:
+            _LOGGER.warning(
+                "Vehicles already initialized, this will re-initialize and cause data loss mapping errors"
+            )
+        vehicles = self.api.get_vehicles(self.get_token())
+        for vehicle in vehicles:
+            self.vehicles[vehicle.id] = vehicle
+
+    @property
+    def supported_commands(self) -> frozenset[str] | None:
+        """Advertised command names; None retains existing regional behavior."""
+        return self.api.supported_commands
+
+    def get_local_diagnostics(self) -> dict[str, Any]:
+        """Read protocol diagnostics without contacting the service or vehicle."""
+        return self.api.get_local_diagnostics()
+
+    def apply_cached_mqtt_state(self, vehicle_id: str) -> bool:
+        """Apply locally received telemetry without refreshing authentication."""
+        return self.api.apply_cached_mqtt_state(self.get_vehicle(vehicle_id))
+
+    def get_vehicle(self, vehicle_id: str) -> Vehicle:
+        return self.vehicles[vehicle_id]
+
+    def update_all_vehicles_with_cached_state(self) -> None:
+        for vehicle_id in self.vehicles:
+            self.update_vehicle_with_cached_state(vehicle_id)
+
+    def update_vehicle_with_cached_state(self, vehicle_id: str) -> None:
+        vehicle = self.get_vehicle(vehicle_id)
+        if vehicle.enabled:
+            vehicle.last_scanned_at = dt.datetime.now(dt.UTC)
+            self.api.update_vehicle_with_cached_state(self.get_token(), vehicle)
+            if self.geocode_api_enable is True:
+                self.api.update_geocoded_location(
+                    token=self.get_token(),
+                    vehicle=vehicle,
+                    use_email=self.geocode_api_use_email,
+                    provider=self.geocode_provider,
+                    API_KEY=self.geocode_api_key,
+                )
+        else:
+            _LOGGER.debug(f"{DOMAIN} - Vehicle Disabled, skipping.")
+
+    def check_and_force_update_vehicles(self, force_refresh_interval: int) -> None:
+        for vehicle_id in self.vehicles:
+            self.check_and_force_update_vehicle(force_refresh_interval, vehicle_id)
+
+    def check_and_force_update_vehicle(
+        self, force_refresh_interval: int, vehicle_id: str
+    ) -> None:
+        # Force refresh only if current data is older than the value bassed in seconds.
+        # Otherwise runs a cached update.
+        started_at_utc: dt.datetime = dt.datetime.now(dt.UTC)
+        vehicle = self.get_vehicle(vehicle_id)
+        if vehicle.last_updated_at is not None:
+            _LOGGER.debug(
+                f"{DOMAIN} - Time differential in seconds: {(started_at_utc - vehicle.last_updated_at).total_seconds()}"
+            )
+            if (
+                started_at_utc - vehicle.last_updated_at
+            ).total_seconds() > force_refresh_interval:
+                self.force_refresh_vehicle_state(vehicle_id)
+            else:
+                self.update_vehicle_with_cached_state(vehicle_id)
+        else:
+            self.update_vehicle_with_cached_state(vehicle_id)
+
+    def force_refresh_all_vehicles_states(self) -> None:
+        for vehicle_id in self.vehicles:
+            self.force_refresh_vehicle_state(vehicle_id)
+
+    def force_refresh_vehicle_state(self, vehicle_id: str) -> None:
+        vehicle = self.get_vehicle(vehicle_id)
+        if vehicle.enabled:
+            vehicle.last_scanned_at = dt.datetime.now(dt.UTC)
+            self.api.force_refresh_vehicle_state(self.get_token(), vehicle)
+        else:
+            _LOGGER.debug(f"{DOMAIN} - Vehicle Disabled, skipping.")
+
+    def get_svm_details(self, vehicle_id: str) -> SVMDetails:
+        """Return the latest cached SVM composite image and metadata.
+
+        Delegates to the region-specific API implementation. Raises
+        NotImplementedError on regions without SVM support.
+        """
+        return self.api.get_svm_details(self.get_token(), self.get_vehicle(vehicle_id))
+
+    def request_svm_capture(
+        self, vehicle_id: str, acknowledged_warning: bool
+    ) -> SVMDetails:
+        """Trigger a fresh SVM capture and return the resulting image.
+
+        ``acknowledged_warning`` must be True; the caller must explicitly
+        acknowledge the safety warning before triggering a capture.
+        """
+        return self.api.request_svm_capture(
+            self.get_token(), self.get_vehicle(vehicle_id), acknowledged_warning
+        )
+
+    def check_and_refresh_token(self) -> bool:
+        if self.token is None:
+            if self.login() is True:
+                if len(self.vehicles) == 0:
+                    self.initialize_vehicles()
+                return True
+            else:
+                raise AuthenticationError("Japan sign-in did not return a token")
+        now_utc = dt.datetime.now(dt.UTC)
+        grace_period = timedelta(seconds=10)
+        min_supported_datetime = dt.datetime.min.replace(tzinfo=dt.UTC)
+        valid_until = self.token.valid_until
+        token_expired = False
+        if not isinstance(valid_until, dt.datetime):
+            token_expired = True
+        else:
+            if valid_until.tzinfo is None:
+                valid_until = valid_until.replace(tzinfo=dt.UTC)
+            if valid_until <= min_supported_datetime + grace_period:
+                token_expired = True
+            else:
+                token_expired = valid_until - grace_period <= now_utc
+        if token_expired or self.api.test_token(self.token) is False:
+            _LOGGER.debug(f"{DOMAIN} - Refresh token expired")
+            result = self.api.refresh_access_token(self.token)
+            if isinstance(result, Token):
+                self.token = result
+                # Temp correction to fix bad data due to a bug.
+                if self.token.pin != self.pin:
+                    self.token.pin = self.pin
+                if len(self.vehicles) == 0:
+                    self.initialize_vehicles()
+            else:
+                raise AuthenticationError("Japan refresh did not return a token")
+            self.api.refresh_vehicles(self.token, self.vehicles)
+            return True
+        if len(self.vehicles) == 0:
+            self.initialize_vehicles()
+        return False
+
+    def start_climate(
+        self, vehicle_id: str, options: ClimateRequestOptions
+    ) -> str | None:
+        return self.api.start_climate(
+            self.get_token(), self.get_vehicle(vehicle_id), options
+        )
+
+    def stop_climate(self, vehicle_id: str) -> str | None:
+        return self.api.stop_climate(self.get_token(), self.get_vehicle(vehicle_id))
+
+    def start_pet_care(
+        self, vehicle_id: str, options: ClimateRequestOptions | None = None
+    ) -> str:
+        return self.api.start_pet_care(
+            self.get_token(), self.get_vehicle(vehicle_id), options
+        )
+
+    def stop_pet_care(self, vehicle_id: str) -> str:
+        return self.api.stop_pet_care(self.get_token(), self.get_vehicle(vehicle_id))
+
+    def start_battery_conditioning(self, vehicle_id: str) -> str:
+        return self.api.start_battery_conditioning(
+            self.get_token(), self.get_vehicle(vehicle_id)
+        )
+
+    def stop_battery_conditioning(self, vehicle_id: str) -> str:
+        return self.api.stop_battery_conditioning(
+            self.get_token(), self.get_vehicle(vehicle_id)
+        )
+
+    def lock(self, vehicle_id: str) -> str | None:
+        return self.api.lock_action(
+            self.get_token(), self.get_vehicle(vehicle_id), VEHICLE_LOCK_ACTION.LOCK
+        )
+
+    def unlock(self, vehicle_id: str) -> str | None:
+        return self.api.lock_action(
+            self.get_token(),
+            self.get_vehicle(vehicle_id),
+            VEHICLE_LOCK_ACTION.UNLOCK,
+        )
+
+    def start_charge(self, vehicle_id: str) -> str | None:
+        return self.api.start_charge(self.get_token(), self.get_vehicle(vehicle_id))
+
+    def stop_charge(self, vehicle_id: str) -> str | None:
+        return self.api.stop_charge(self.get_token(), self.get_vehicle(vehicle_id))
+
+    def start_hazard_lights(self, vehicle_id: str) -> str | None:
+        return self.api.start_hazard_lights(
+            self.get_token(), self.get_vehicle(vehicle_id)
+        )
+
+    def start_hazard_lights_and_horn(self, vehicle_id: str) -> str | None:
+        return self.api.start_hazard_lights_and_horn(
+            self.get_token(), self.get_vehicle(vehicle_id)
+        )
+
+    def door_power_off(self, vehicle_id: str) -> str:
+        return self.api.door_power_off(self.get_token(), self.get_vehicle(vehicle_id))
+
+    def open_frunk(self, vehicle_id: str) -> str:
+        return self.api.open_frunk(self.get_token(), self.get_vehicle(vehicle_id))
+
+    def turn_off_lamp(
+        self, vehicle_id: str, mode: LAMP_MODE = LAMP_MODE.ALL_OFF
+    ) -> str:
+        return self.api.turn_off_lamp(
+            self.get_token(), self.get_vehicle(vehicle_id), mode
+        )
+
+    def stop_rear_seat_alarm(self, vehicle_id: str) -> str:
+        return self.api.stop_rear_seat_alarm(
+            self.get_token(), self.get_vehicle(vehicle_id)
+        )
+
+    def set_charge_alarm(self, vehicle_id: str, enabled: bool) -> str:
+        return self.api.set_charge_alarm(
+            self.get_token(), self.get_vehicle(vehicle_id), enabled
+        )
+
+    def set_charge_limits(self, vehicle_id: str, ac: int, dc: int) -> str | None:
+        return self.api.set_charge_limits(
+            self.get_token(), self.get_vehicle(vehicle_id), ac, dc
+        )
+
+    def set_charging_current(self, vehicle_id: str, level: int) -> str:
+        return self.api.set_charging_current(
+            self.get_token(), self.get_vehicle(vehicle_id), level
+        )
+
+    def set_windows_state(self, vehicle_id: str, options: WindowRequestOptions) -> str:
+        return self.api.set_windows_state(
+            self.get_token(), self.get_vehicle(vehicle_id), options
+        )
+
+    def check_action_status(
+        self,
+        vehicle_id: str,
+        action_id: str,
+        synchronous: bool = False,
+        timeout: int = 120,
+    ) -> ORDER_STATUS:
+        """
+        Check for the status of a sent action/command.
+
+        Actions can have 4 states:
+        - pending: request sent to vehicle, waiting for response
+        - success: vehicle confirmed that the action was performed
+        - fail: vehicle could not perform the action
+                (most likely because a condition was not met)
+        - vehicle timeout: request sent to vehicle, no response received.
+
+        In case of timeout, the API can return "pending" for up to 2 minutes before
+        it returns a final state.
+
+        :param vehicle_id: ID of the vehicle
+        :param action_id: ID of the action
+        :param synchronous: Whether to wait for pending actions to reach a final
+                            state (success/fail/timeout)
+        :param timeout:
+            Time in seconds to wait for pending actions to reach a final state.
+        :return: status of the order
+        """
+        return self.api.check_action_status(
+            self.get_token(),
+            self.get_vehicle(vehicle_id),
+            action_id,
+            synchronous,
+            timeout,
+        )
+
+    def open_charge_port(self, vehicle_id: str) -> str:
+        return self.api.charge_port_action(
+            self.get_token(), self.get_vehicle(vehicle_id), CHARGE_PORT_ACTION.OPEN
+        )
+
+    def close_charge_port(self, vehicle_id: str) -> str:
+        return self.api.charge_port_action(
+            self.get_token(), self.get_vehicle(vehicle_id), CHARGE_PORT_ACTION.CLOSE
+        )
+
+    def update_month_trip_info(self, vehicle_id: str, yyyymm_string: str) -> None:
+        """
+        feature only available for some regions.
+        Updates the vehicle.month_trip_info for the specified month.
+
+        Default this information is None:
+
+        month_trip_info: MonthTripInfo = None
+        """
+        vehicle = self.get_vehicle(vehicle_id)
+        self.api.update_month_trip_info(self.get_token(), vehicle, yyyymm_string)
+
+    def update_day_trip_info(self, vehicle_id: str, yyyymmdd_string: str) -> None:
+        """
+        feature only available for some regions.
+        Updates the vehicle.day_trip_info information for the specified day.
+
+        Default this information is None:
+
+        day_trip_info: DayTripInfo = None
+        """
+        vehicle = self.get_vehicle(vehicle_id)
+        self.api.update_day_trip_info(self.get_token(), vehicle, yyyymmdd_string)
+
+    def disable_vehicle(self, vehicle_id: str) -> None:
+        self.get_vehicle(vehicle_id).enabled = False
+
+    def enable_vehicle(self, vehicle_id: str) -> None:
+        self.get_vehicle(vehicle_id).enabled = True
+
+    def schedule_charging_and_climate(
+        self, vehicle_id: str, options: ScheduleChargingClimateRequestOptions
+    ) -> str:
+        """Set scheduled charging and/or climate for the vehicle.
+
+        ``None`` option fields mean "leave unchanged": the library resolves
+        them from the vehicle's current settings. On ccNC/EV5-appMode EVs a
+        scope whose options are all ``None`` skips its endpoint entirely;
+        calling with no field set raises ``ValueError``.
+        """
+        return self.api.schedule_charging_and_climate(
+            self.get_token(), self.get_vehicle(vehicle_id), options
+        )
+
+    def start_valet_mode(self, vehicle_id: str) -> str:
+        return self.api.valet_mode_action(
+            self.get_token(), self.get_vehicle(vehicle_id), VALET_MODE_ACTION.ACTIVATE
+        )
+
+    def stop_valet_mode(self, vehicle_id: str) -> str:
+        return self.api.valet_mode_action(
+            self.get_token(), self.get_vehicle(vehicle_id), VALET_MODE_ACTION.DEACTIVATE
+        )
+
+    def set_vehicle_to_load_discharge_limit(self, vehicle_id: str, limit: int) -> str:
+        return self.api.set_vehicle_to_load_discharge_limit(
+            self.get_token(), self.get_vehicle(vehicle_id), limit
+        )
+
+    def start_ota_update(self, vehicle_id: str, start: bool) -> dict[str, Any]:
+        return self.api.start_ota_update(
+            self.get_token(), self.get_vehicle(vehicle_id), start
+        )
+
+    def set_navigation(self, vehicle_id: str, poi_list: list[POIInfo]) -> str:
+        return self.api.set_navigation(
+            self.get_token(), self.get_vehicle(vehicle_id), poi_list
+        )
+
+    # Push glue — the VehicleManager stays the surface; the transport
+    # lifecycle (broker registration, subscriptions, callbacks, reconnect)
+    # lives in MqttPushSession (mqtt_push_session).
+
+    def _ensure_push_session(self) -> None:
+        """Create the push session, wiring manager accessors into it."""
+        if self._push_session is None:
+            self._push_session = MqttPushSession(
+                api=self.api,
+                token_fn=lambda: self.get_token(),
+                refresh_fn=self.check_and_refresh_token,
+                get_vehicle=self.get_vehicle,
+                vehicles=lambda: self.vehicles,
+                after_close_fn=lambda: self.api.close(),
+            )
+            self._push_session.set_status_callback(self._push_status_callback)
+            session = self._push_session
+            if self._push_connection_change_callback:
+                session.set_connection_change_callback(
+                    self._push_connection_change_callback
+                )
+
+    def start_push(self, vehicle_id: str) -> bool:
+        """Connect to the push broker and subscribe the vehicle's topics.
+
+        Returns False when push is unavailable (unsupported region, no
+        broker info, rejected registration); ``APIError`` propagates.
+        """
+        with self._lifecycle_lock:
+            if self._closed:
+                return False
+            vehicle = self.vehicles.get(vehicle_id)
+            # False skips outright; None attempts (the flow's metadata refines it).
+            if vehicle is None or vehicle.supports.mqtt_push is False:
+                _LOGGER.debug(
+                    f"{DOMAIN} - Push not supported on {type(self.api).__name__}"
+                )
+                return False
+            self._ensure_push_session()
+            assert self._push_session is not None
+            session = self._push_session
+        try:
+            started = session.ensure_started(vehicle_id)
+        finally:
+            # Startup callbacks can close the manager before registration finishes.
+            if self._closed:
+                try:
+                    session.close()
+                finally:
+                    self.api.close()
+        return started and not self._closed
+
+    def stop_push(self) -> None:
+        """Disconnect push and reset orchestration state."""
+        if self._push_session is not None:
+            self._push_session.stop()
+
+    @property
+    def is_push_connected(self) -> bool:
+        """Whether the push transport is connected."""
+        return self._push_session is not None and self._push_session.is_connected
+
+    def set_push_status_callback(
+        self, callback: Callable[[str, str], None] | None = None
+    ) -> None:
+        """Register a callback for status pushes: (vehicle_id, topic_type)."""
+        self._push_status_callback = callback
+        if self._push_session is not None:
+            self._push_session.set_status_callback(callback)
+
+    def set_push_connection_change_callback(
+        self, callback: Callable[[bool], None] | None = None
+    ) -> None:
+        """Register a callback for push connection changes: (connected: bool)."""
+        self._push_connection_change_callback = callback
+        if self._push_session is not None:
+            self._push_session.set_connection_change_callback(callback)
+
+    def get_push_connection_state(self) -> MQTT_PUSH_CONNECTION_STATE | None:
+        """Push connection state through the region API (delegator)."""
+        return self.api.get_push_connection_state(self.get_token())
+
+    @staticmethod
+    def get_implementation_by_region_brand(
+        region: int, brand: int, language: str
+    ) -> ApiImpl:
+        """Construct the only service supported by HyundaiJP."""
+        if region != 10 or brand != 2:
+            raise APIError("HyundaiJP supports Hyundai Japan only")
+        return KiaUvoApiJP(region, brand, language)
