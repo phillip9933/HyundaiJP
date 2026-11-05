@@ -34,12 +34,17 @@ async def test_saved_token_upgrade_ignores_old_metadata_without_reauth(monkeypat
     }
     entry = SimpleNamespace(
         entry_id="synthetic-entry",
+        async_on_unload=Mock(),
         unique_id="synthetic-account",
         data=data,
         options={"enable_geolocation_entity": True, "use_email_with_geocode_api": True},
     )
     hass = MagicMock()
-    hass.data = {DATA_REGISTRY: SimpleNamespace(async_get_device=lambda **kwargs: None)}
+    hass.data = {
+        DATA_REGISTRY: SimpleNamespace(
+            async_get_device_by_identifier=lambda *args, **kwargs: None
+        )
+    }
 
     async def executor(target, *args):
         return target(*args)

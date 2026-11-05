@@ -136,6 +136,7 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             hass,
             _LOGGER,
             name=DOMAIN,
+            config_entry=config_entry,
             update_interval=timedelta(
                 seconds=min(self.scan_interval, self.force_refresh_interval)
             ),
@@ -389,12 +390,17 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     @callback
     def _sync_vehicle_enabled_states(self) -> None:
         """Stop polling vehicles whose device the user disabled in HA."""
+        config_entry = self.config_entry
+        assert config_entry is not None
         registry = dr.async_get(self.hass)
         for vehicle_id, vehicle in self.vehicle_manager.vehicles.items():
-            identifiers = {(DOMAIN, vehicle_id)}
-            if vehicle.VIN:
-                identifiers.add((DOMAIN, f"vin:{vehicle.VIN}"))
-            device = registry.async_get_device(identifiers=identifiers)
+            device = registry.async_get_device_by_identifier(
+                (DOMAIN, vehicle_id), config_entry.entry_id
+            )
+            if device is None and vehicle.VIN:
+                device = registry.async_get_device_by_identifier(
+                    (DOMAIN, f"vin:{vehicle.VIN}"), config_entry.entry_id
+                )
             if device is not None and device.disabled:
                 self.vehicle_manager.disable_vehicle(vehicle_id)
             else:

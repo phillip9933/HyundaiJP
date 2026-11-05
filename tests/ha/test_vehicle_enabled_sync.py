@@ -1,5 +1,6 @@
 """Tests for syncing HA device enabled state to the library."""
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -18,15 +19,20 @@ def _sync(
     manager = VehicleManager.__new__(VehicleManager)
     manager.vehicles = {v.id: v for v in vehicles}
 
-    def get_device(identifiers: set[tuple[str, str]]) -> MagicMock | None:
-        return next((devices[i] for i in identifiers if i in devices), None)
+    def get_device(
+        identifier: tuple[str, str], config_entry_id: str
+    ) -> MagicMock | None:
+        assert config_entry_id == "synthetic-entry"
+        return devices.get(identifier)
 
     registry = MagicMock()
-    registry.async_get_device.side_effect = get_device
+    registry.async_get_device_by_identifier.side_effect = get_device
+    registry.async_get_device.side_effect = AssertionError("Unscoped device lookup")
     monkeypatch.setattr(coordinator_module.dr, "async_get", lambda _: registry)
 
     coordinator = JapanDataUpdateCoordinator.__new__(JapanDataUpdateCoordinator)
     coordinator.hass = MagicMock()
+    coordinator.config_entry = SimpleNamespace(entry_id="synthetic-entry")
     coordinator.vehicle_manager = manager
     coordinator._sync_vehicle_enabled_states()
     return manager

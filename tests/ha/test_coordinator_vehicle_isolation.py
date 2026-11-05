@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import logging
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -30,10 +31,12 @@ class _StubDeviceRegistry:
     def __init__(self, disabled_ids: set[str] | None = None) -> None:
         self._disabled = disabled_ids or set()
 
-    def async_get_device(self, identifiers) -> Any | None:
-        for _, identifier in identifiers:
-            if identifier in self._disabled:
-                return MagicMock(disabled=True)
+    def async_get_device_by_identifier(
+        self, identifier: tuple[str, str], config_entry_id: str
+    ) -> Any | None:
+        assert config_entry_id == "synthetic-entry"
+        if identifier[1] in self._disabled:
+            return MagicMock(disabled=True)
         return None
 
 
@@ -66,6 +69,7 @@ def _make_coordinator(
     coordinator = JapanDataUpdateCoordinator.__new__(JapanDataUpdateCoordinator)
     coordinator._action_lock = asyncio.Lock()
     coordinator.hass = _FakeHass()  # type: ignore[assignment]
+    coordinator.config_entry = SimpleNamespace(entry_id="synthetic-entry")  # type: ignore[assignment]
     coordinator.force_refresh_interval = 1440
     coordinator._failed_vehicles = set()
     coordinator._vehicle_failures = {}
@@ -365,7 +369,7 @@ def _make_update_coordinator(
     coordinator.scan_interval = 1800
     coordinator.no_force_refresh_hour_start = 22
     coordinator.no_force_refresh_hour_finish = 7
-    entry = MagicMock()
+    entry = MagicMock(entry_id="synthetic-entry")
     entry.data = {}
     entry.options = {}
     coordinator.config_entry = entry  # type: ignore[assignment]
@@ -447,7 +451,7 @@ async def test_disabled_device_syncs_to_the_manager() -> None:
     """The device-enabled sync flips the manager flag the library gates on."""
     coordinator = _make_coordinator({"a": _FakeVehicle("a")})
     coordinator.hass.data[DATA_REGISTRY] = _StubDeviceRegistry({"a"})
-    coordinator.config_entry = MagicMock()
+    coordinator.config_entry = MagicMock(entry_id="synthetic-entry")
     coordinator.config_entry.data = {}
 
     await coordinator.async_check_and_refresh_token()
