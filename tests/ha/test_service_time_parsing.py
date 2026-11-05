@@ -16,9 +16,8 @@ async def _call(
     coordinator.async_set_off_peak_charging = AsyncMock()
     coordinator.async_schedule_charging_and_climate = AsyncMock()
     monkeypatch.setattr(
-        services, "_get_coordinator_from_device", lambda *_: coordinator
+        services, "_resolve_vehicle_target", lambda *_: (coordinator, "v1")
     )
-    monkeypatch.setattr(services, "_get_vehicle_id_from_device", lambda *_: "v1")
 
     hass = MagicMock()
     services.async_setup_services(hass)
