@@ -9,6 +9,10 @@ from unittest.mock import Mock
 import pytest
 
 from custom_components.hyundai_jp._api.client import HyundaiBluelinkApi
+from custom_components.hyundai_jp._api.exceptions import (
+    AuthenticationError,
+    RateLimitingError,
+)
 from custom_components.hyundai_jp._api.Token import Token
 from custom_components.hyundai_jp._api.Vehicle import Vehicle
 
@@ -299,3 +303,46 @@ def test_fractional_delta_does_not_block_later_lock_and_port_state(host_timezone
     )
     api._request.assert_not_called()
     api.session.request.assert_not_called()
+
+
+@pytest.mark.parametrize("failure", [AuthenticationError, RateLimitingError])
+def test_optional_account_failure_keeps_queued_observation_for_next_read(failure):
+    api, vehicle, helper = setup()
+    token = Token(username="synthetic", password="synthetic")
+    pending = []
+
+    def drain():
+        observations = list(pending)
+        pending.clear()
+        return observations
+
+    helper.drain_state_updates = Mock(side_effect=drain)
+    api._request.side_effect = None
+    api._request.return_value = {
+        "resMsg": {"state": {"Vehicle": state("20261103020000.100")}}
+    }
+
+    def fail_location(unused_token, unused_candidate):
+        # A new push can arrive while the optional HTTP read is in flight.
+        pending.append(delta("20261103020000.200"))
+        raise failure("synthetic account boundary")
+
+    api.update_vehicle_with_cached_location = Mock(side_effect=fail_location)
+    previous = copy.deepcopy(vehicle.__dict__)
+    with pytest.raises(failure):
+        api.update_vehicle_with_cached_state(token, vehicle)
+    assert vehicle.__dict__ == previous
+    assert vehicle.id not in api._passive_state_observed_at
+    helper.drain_state_updates.assert_not_called()
+    assert pending
+
+    api.update_vehicle_with_cached_location = Mock()
+    api.update_vehicle_with_cached_state(token, vehicle)
+    assert not pending
+    assert vehicle.is_locked is False
+    assert vehicle.last_updated_at == dt.datetime(
+        2026, 11, 3, 2, 0, 0, 200000, tzinfo=dt.UTC
+    )
+    assert api._passive_state_observed_at[vehicle.id] == vehicle.last_updated_at
+    assert vehicle.data["Date"] == "20261103020000.200"
+    assert api._request.call_count == 2

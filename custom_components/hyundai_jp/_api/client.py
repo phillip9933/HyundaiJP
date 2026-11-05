@@ -640,95 +640,112 @@ class HyundaiBluelinkApi(JapanCommandsMixin, JapanSVM, JapanAuthClient):
                 "GET", f"/api/v1/spa/vehicles/{vehicle.id}/{endpoint}", headers=headers
             )
         )
+        parsed_vehicle = self._parse_cached_status(vehicle, payload, protocol)
+        if parsed_vehicle is None:
+            return
+        self._enrich_cached_status(token, parsed_vehicle, vehicle)
+        if protocol:
+            # MQTT may arrive during optional cached reads. Apply it to the
+            # candidate so those optional fields are retained without rollback.
+            self.apply_cached_mqtt_state(parsed_vehicle)
+        vehicle.__dict__.update(parsed_vehicle.__dict__)
+
+    def _parse_cached_status(
+        self, vehicle: Vehicle, payload: dict[str, Any], protocol: int
+    ) -> Vehicle | None:
+        """Parse core data on a candidate; stale CCS2 status never replaces MQTT."""
         try:
             parsed_vehicle = copy.deepcopy(vehicle)
             if protocol:
-                state = payload["state"]["Vehicle"]
-                if not isinstance(state, dict):
-                    raise TypeError
-                if not state.get("Date"):
-                    raise ValueError
-                observed_at = self._ccs2_observation_time(state["Date"])
-                passive_at = self._passive_state_observed_at.get(vehicle.id)
-                retains_passive_state = (
-                    passive_at is not None
-                    and isinstance(vehicle.data, dict)
-                    and self._ccs2_observation_time(vehicle.data.get("Date"))
-                    >= passive_at
-                )
-                if (
-                    vehicle.last_updated_at is not None
-                    and observed_at < vehicle.last_updated_at
-                ) or (
-                    retains_passive_state
-                    and passive_at is not None
-                    and observed_at <= passive_at
-                ):
-                    self.apply_cached_mqtt_state(vehicle)
-                    return
-                self._update_vehicle_properties_ccs2(parsed_vehicle, state)
-                parsed_vehicle.last_updated_at = observed_at.astimezone(
-                    self.data_timezone
-                )
+                if not self._parse_cached_ccs2_status(vehicle, parsed_vehicle, payload):
+                    return None
             else:
-                info = payload["vehicleStatusInfo"]
-                state = {
-                    "status": info["vehicleStatus"],
-                    "vehicleLocation": info.get("vehicleLocation"),
-                }
-                if not isinstance(state["status"], dict):
-                    raise TypeError
-                if not state["status"].get("time"):
-                    raise ValueError
-                parse_datetime(state["status"]["time"], self.data_timezone)
-                temperature = self._legacy_temperature(
-                    vehicle, state["status"].get("airTemp")
-                )
-                state = copy.deepcopy(state)
-                state["status"].pop("airTemp", None)
-                self._telemetry._update_vehicle_properties(parsed_vehicle, state)
-                profile_options = self._vehicle_profiles.get(vehicle.id, {}).get(
-                    "option", {}
-                )
-                seat_location = (
-                    profile_options.get("drvSeatLoc")
-                    if isinstance(profile_options, dict)
-                    else None
-                )
-                seats = get_child_value(state, "status.seatHeaterVentState")
-                if isinstance(seats, dict) and seat_location in ("L", "R"):
-                    for physical, logical in (
-                        (
-                            "front_left_seat_status",
-                            "drvSeatHeatState"
-                            if seat_location == "L"
-                            else "astSeatHeatState",
-                        ),
-                        (
-                            "front_right_seat_status",
-                            "astSeatHeatState"
-                            if seat_location == "L"
-                            else "drvSeatHeatState",
-                        ),
-                    ):
-                        if (
-                            getattr(parsed_vehicle, physical) is None
-                            and logical in seats
-                        ):
-                            setattr(
-                                parsed_vehicle,
-                                physical,
-                                SEAT_STATUS.get(seats[logical]),
-                            )
-                parsed_vehicle.air_temperature = (
-                    temperature,
-                    "°C" if temperature is not None else None,
-                )
+                self._parse_cached_flat_status(vehicle, parsed_vehicle, payload)
+            return parsed_vehicle
         except KeyError, TypeError, ValueError, AttributeError:
             raise InvalidAPIResponseError("Japan cached status is incomplete") from None
-        # Optional enrichment cannot discard valid core status after a
-        # temporary endpoint failure. Authentication/rate-limit failures still
-        # propagate so they are handled once at the account boundary.
+
+    def _parse_cached_ccs2_status(
+        self, vehicle: Vehicle, parsed_vehicle: Vehicle, payload: dict[str, Any]
+    ) -> bool:
+        """Keep the CCS2 source timestamp and reject stale REST snapshots."""
+        state = payload["state"]["Vehicle"]
+        if not isinstance(state, dict):
+            raise TypeError
+        if not state.get("Date"):
+            raise ValueError
+        observed_at = self._ccs2_observation_time(state["Date"])
+        passive_at = self._passive_state_observed_at.get(vehicle.id)
+        retains_passive_state = (
+            passive_at is not None
+            and isinstance(vehicle.data, dict)
+            and self._ccs2_observation_time(vehicle.data.get("Date")) >= passive_at
+        )
+        if (
+            vehicle.last_updated_at is not None
+            and observed_at < vehicle.last_updated_at
+        ) or (
+            retains_passive_state
+            and passive_at is not None
+            and observed_at <= passive_at
+        ):
+            self.apply_cached_mqtt_state(vehicle)
+            return False
+        self._update_vehicle_properties_ccs2(parsed_vehicle, state)
+        parsed_vehicle.last_updated_at = observed_at.astimezone(self.data_timezone)
+        return True
+
+    def _parse_cached_flat_status(
+        self, vehicle: Vehicle, parsed_vehicle: Vehicle, payload: dict[str, Any]
+    ) -> None:
+        """Interpret legacy temperature and physical seats using the Japan profile."""
+        info = payload["vehicleStatusInfo"]
+        state = {
+            "status": info["vehicleStatus"],
+            "vehicleLocation": info.get("vehicleLocation"),
+        }
+        if not isinstance(state["status"], dict):
+            raise TypeError
+        if not state["status"].get("time"):
+            raise ValueError
+        parse_datetime(state["status"]["time"], self.data_timezone)
+        temperature = self._legacy_temperature(vehicle, state["status"].get("airTemp"))
+        state = copy.deepcopy(state)
+        state["status"].pop("airTemp", None)
+        self._telemetry._update_vehicle_properties(parsed_vehicle, state)
+        profile_options = self._vehicle_profiles.get(vehicle.id, {}).get("option", {})
+        seat_location = (
+            profile_options.get("drvSeatLoc")
+            if isinstance(profile_options, dict)
+            else None
+        )
+        seats = get_child_value(state, "status.seatHeaterVentState")
+        if isinstance(seats, dict) and seat_location in ("L", "R"):
+            for physical, logical in (
+                (
+                    "front_left_seat_status",
+                    "drvSeatHeatState" if seat_location == "L" else "astSeatHeatState",
+                ),
+                (
+                    "front_right_seat_status",
+                    "astSeatHeatState" if seat_location == "L" else "drvSeatHeatState",
+                ),
+            ):
+                if getattr(parsed_vehicle, physical) is None and logical in seats:
+                    setattr(
+                        parsed_vehicle,
+                        physical,
+                        SEAT_STATUS.get(seats[logical]),
+                    )
+        parsed_vehicle.air_temperature = (
+            temperature,
+            "°C" if temperature is not None else None,
+        )
+
+    def _enrich_cached_status(
+        self, token: Token, parsed_vehicle: Vehicle, vehicle: Vehicle
+    ) -> None:
+        """Add optional data with its existing cooldowns before atomic publication."""
         if (
             parsed_vehicle.location_latitude is None
             or parsed_vehicle.location_longitude is None
@@ -786,11 +803,6 @@ class HyundaiBluelinkApi(JapanCommandsMixin, JapanSVM, JapanAuthClient):
                     ("ev_charge_limits_ac", "ev_charge_limits_dc"),
                     unavailable_cooldown=3600,
                 )
-        if protocol:
-            # MQTT may arrive during optional cached reads. Apply it to the
-            # candidate so those optional fields are retained without rollback.
-            self.apply_cached_mqtt_state(parsed_vehicle)
-        vehicle.__dict__.update(parsed_vehicle.__dict__)
 
     def _read_optional_state(
         self,
