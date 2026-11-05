@@ -4,7 +4,9 @@ import datetime as dt
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
-from custom_components.hyundai_jp import coordinator as module
+from custom_components.hyundai_jp import coordinator as module, image as image_module
+from custom_components.hyundai_jp._api import Vehicle
+from custom_components.hyundai_jp.const import DOMAIN
 from custom_components.hyundai_jp.image import SVMImageEntity
 from custom_components.hyundai_jp.sensor import SVMStatusSensor
 from tests.ha.helpers import make_operation_coordinator
@@ -51,3 +53,26 @@ def test_capture_timestamp_is_preserved_when_available():
     result._cache_svm_details("synthetic", SimpleNamespace(captured_at=captured))
     assert result.get_svm_image_updated_at("synthetic") == captured
     assert result.get_svm_image_updated_at("missing") is None
+
+
+async def test_image_setup_does_not_attempt_a_futile_startup_fetch(monkeypatch):
+    vehicle = Vehicle(id="synthetic")
+    vehicle.supports.svm = True
+    coordinator = SimpleNamespace(
+        vehicle_manager=SimpleNamespace(vehicles={vehicle.id: vehicle}),
+        async_get_svm_details=AsyncMock(
+            side_effect=AssertionError("No session-local capture exists after restart")
+        ),
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"synthetic-entry": coordinator}})
+    constructor = MagicMock(side_effect=lambda *args: object())
+    monkeypatch.setattr(image_module, "SVMImageEntity", constructor)
+    added = MagicMock()
+
+    await image_module.async_setup_entry(
+        hass, SimpleNamespace(unique_id="synthetic-entry"), added
+    )
+
+    coordinator.async_get_svm_details.assert_not_awaited()
+    assert constructor.call_count == 5
+    assert len(added.call_args.args[0]) == 5

@@ -11,7 +11,6 @@ entity request.
 from __future__ import annotations
 
 from dataclasses import dataclass
-import logging
 
 from homeassistant.components.image import ImageEntity
 from homeassistant.config_entries import ConfigEntry
@@ -24,8 +23,6 @@ from ._api import Vehicle
 from .const import DOMAIN
 from .coordinator import SIGNAL_SVM_RENDER, JapanDataUpdateCoordinator
 from .entity import HyundaiBluelinkEntity
-
-_LOGGER = logging.getLogger(__name__)
 
 PARALLEL_UPDATES = 0
 
@@ -62,16 +59,8 @@ async def async_setup_entry(
     for vehicle_id in coordinator.vehicle_manager.vehicles:
         vehicle: Vehicle = coordinator.vehicle_manager.vehicles[vehicle_id]
         if vehicle.supports.svm:
-            # Best-effort: populate the cache so the image entities are
-            # available immediately after restart instead of waiting for a
-            # manual capture. get_svm_details is a cheap cached GET — it does
-            # not wake the car.
-            try:
-                await coordinator.async_get_svm_details(vehicle_id)
-            except Exception:
-                _LOGGER.debug(
-                    "SVM initial fetch failed for %s", vehicle_id, exc_info=True
-                )
+            # Captures are session-local and user initiated. A restart has no
+            # saved camera bytes to fetch; entities await the next capture.
             for view in SVM_VIEWS:
                 entities.append(SVMImageEntity(coordinator, vehicle, view))
 
