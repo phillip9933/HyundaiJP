@@ -1,0 +1,9 @@
+# Python 3.14. Runtime requirements are installed from the integration manifest.
+homeassistant==2026.9.2
+mypy==2.3.1
+pytest==9.1.1
+pytest-asyncio==1.4.0
+pytest-socket==0.8.1
+ruff==0.17.3
+types-requests==2.32.4.20250913
+PyYAML==6.0.3

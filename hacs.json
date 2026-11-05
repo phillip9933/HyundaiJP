@@ -1,0 +1,7 @@
+{
+  "name": "HyundaiJP",
+  "homeassistant": "2026.9.2",
+  "zip_release": true,
+  "filename": "hyundai_jp.zip",
+  "hide_default_branch": true
+}

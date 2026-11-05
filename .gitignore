@@ -4,8 +4,8 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .venv/
-dist/
-build/
+/dist/
+/build/
 coverage.xml
 .coverage
 .env
