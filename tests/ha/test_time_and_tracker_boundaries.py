@@ -12,14 +12,11 @@ from custom_components.hyundai_jp._api import Vehicle
 from tests.ha.helpers import make_coordinator, make_hass
 
 
-async def test_time_setup_exposes_only_reported_fields_on_supported_accounts():
+async def test_time_setup_exposes_only_reported_fields():
     first, second = Vehicle(id="first"), Vehicle(id="second")
     first.ev_off_peak_start_time = dt.time(23, 30)
     second.ev_off_peak_end_time = dt.time(6, 15)
     coordinator = make_coordinator(first, second)
-    coordinator.supports_command.side_effect = lambda command: (
-        command == "schedule_charging_and_climate"
-    )
     hass, entry = make_hass(coordinator)
     entities = []
     await time.async_setup_entry(hass, entry, entities.extend)
@@ -35,8 +32,7 @@ async def test_time_setup_exposes_only_reported_fields_on_supported_accounts():
     first.ev_off_peak_start_time = None
     assert entities[0].native_value is None
 
-    coordinator.supports_command.return_value = False
-    coordinator.supports_command.side_effect = None
+    second.ev_off_peak_end_time = None
     entities.clear()
     await time.async_setup_entry(hass, entry, entities.extend)
     assert entities == []

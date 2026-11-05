@@ -9,9 +9,8 @@ from homeassistant.const import ATTR_DEVICE_ID
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import VolSchemaType
 
-from .ha_validation import Schema, validation as vol
-
 from ._api.control_validation import CLIMATE_DURATION_MAX, CLIMATE_DURATION_MIN
+from .ha_validation import Schema, validation as vol
 
 
 def _text(value: Any) -> str:
