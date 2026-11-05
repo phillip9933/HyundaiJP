@@ -7,10 +7,7 @@ import pytest
 from custom_components.hyundai_jp._api import Vehicle
 from custom_components.hyundai_jp._api.ApiImpl import WindowRequestOptions
 from custom_components.hyundai_jp._api.const import WINDOW_STATE
-from custom_components.hyundai_jp.cover import (
-    COVER_DESCRIPTIONS,
-    HyundaiBluelinkCover,
-)
+from custom_components.hyundai_jp.cover import COVER_DESCRIPTIONS, HyundaiBluelinkCover
 
 
 @pytest.mark.parametrize("description", COVER_DESCRIPTIONS, ids=lambda d: d.key)

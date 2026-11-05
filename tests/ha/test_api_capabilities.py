@@ -14,6 +14,7 @@ from tests.ha.conftest import make_coordinator, make_hass
 
 async def test_japan_rejects_unsupported_service_before_authentication():
     result = JapanDataUpdateCoordinator.__new__(JapanDataUpdateCoordinator)
+    result._initialize_runtime_state()
     result.vehicle_manager = MagicMock()
     result.vehicle_manager.api = SimpleNamespace(
         supported_commands=frozenset({"lock_action"})

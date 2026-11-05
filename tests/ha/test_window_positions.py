@@ -54,6 +54,7 @@ async def test_legacy_unspecified_positions_keeps_all_covers():
 
 async def test_vent_all_windows_targets_only_profile_supported_positions():
     coordinator = JapanDataUpdateCoordinator.__new__(JapanDataUpdateCoordinator)
+    coordinator._initialize_runtime_state()
     coordinator.vehicle_manager = MagicMock()
     coordinator.vehicle_manager.vehicles = {
         "synthetic": vehicle(("front_left", "front_right"))

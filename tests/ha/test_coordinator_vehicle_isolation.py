@@ -67,6 +67,7 @@ def _make_coordinator(
 ) -> JapanDataUpdateCoordinator:
     """Build a coordinator with the attributes the polling code touches."""
     coordinator = JapanDataUpdateCoordinator.__new__(JapanDataUpdateCoordinator)
+    coordinator._initialize_runtime_state()
     coordinator._action_lock = asyncio.Lock()
     coordinator.hass = _FakeHass()  # type: ignore[assignment]
     coordinator.config_entry = SimpleNamespace(entry_id="synthetic-entry")  # type: ignore[assignment]

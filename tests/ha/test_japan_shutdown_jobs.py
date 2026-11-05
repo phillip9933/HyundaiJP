@@ -18,10 +18,9 @@ async def test_unlocked_japan_read_drains_before_shared_and_adapter_cleanup(
 ):
     monkeypatch.setattr(DataUpdateCoordinator, "async_shutdown", AsyncMock())
     result = JapanDataUpdateCoordinator.__new__(JapanDataUpdateCoordinator)
+    result._initialize_runtime_state()
     result._action_lock = asyncio.Lock()
-    result._svm_details = {}
-    result._svm_received_at = {}
-    result._svm_views = {}
+
     result._async_save_token = AsyncMock()
     result._sync_vehicle_enabled_states = Mock()
     started, release = asyncio.Event(), asyncio.Event()

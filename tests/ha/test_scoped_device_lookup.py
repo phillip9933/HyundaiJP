@@ -46,6 +46,7 @@ def _coordinator(
     manager = VehicleManager.__new__(VehicleManager)
     manager.vehicles = {vehicle.id: vehicle}
     coordinator = JapanDataUpdateCoordinator.__new__(JapanDataUpdateCoordinator)
+    coordinator._initialize_runtime_state()
     coordinator.hass = Mock()
     # entry_id scopes registry ownership; unique_id is deliberately different.
     coordinator.config_entry = SimpleNamespace(

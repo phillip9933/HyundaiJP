@@ -13,6 +13,7 @@ from custom_components.hyundai_jp.coordinator import JapanDataUpdateCoordinator
 
 def coordinator():
     result = JapanDataUpdateCoordinator.__new__(JapanDataUpdateCoordinator)
+    result._initialize_runtime_state()
     result.vehicle_manager = MagicMock()
     result.vehicle_manager.supported_commands = None
     result.vehicle_manager.api = SimpleNamespace(

@@ -12,7 +12,7 @@ from tests.ha.test_region_operation_serialization import coordinator
 
 async def test_capture_without_gps_time_updates_status_and_render_cache(monkeypatch):
     result = coordinator()
-    result._svm_dewarp = {}
+
     details = SimpleNamespace(
         captured_at=None, image_bytes=b"synthetic", image_sizes=(5, 1, 1, 1, 1, 1)
     )

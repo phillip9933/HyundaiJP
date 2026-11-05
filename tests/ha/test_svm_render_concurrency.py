@@ -12,7 +12,7 @@ from tests.ha.test_region_operation_serialization import coordinator
 
 def render_coordinator():
     result = coordinator()
-    result._svm_dewarp = {}
+
     result._cache_svm_details(
         "synthetic",
         SimpleNamespace(
@@ -126,3 +126,51 @@ async def test_cancelled_view_waits_for_renderer_before_next_view_starts():
     with pytest.raises(asyncio.CancelledError):
         await first
     assert await second == {"front": b"first"}
+
+
+async def test_dewarp_change_during_render_discards_old_preference(monkeypatch):
+    result = render_coordinator()
+    entered, finish = asyncio.Event(), asyncio.Event()
+    preferences = []
+    notify = []
+    monkeypatch.setattr(
+        "custom_components.hyundai_jp.coordinator.async_dispatcher_send",
+        lambda *args: notify.append(args),
+    )
+
+    async def render(operation):
+        enabled = operation.keywords["dewarp"]
+        preferences.append(enabled)
+        if len(preferences) == 1:
+            entered.set()
+            await finish.wait()
+        return {"front": b"corrected" if enabled else b"fisheye"}
+
+    result.hass.async_add_executor_job = AsyncMock(side_effect=render)
+    task = asyncio.create_task(result.async_get_svm_views("synthetic"))
+    await entered.wait()
+    result.set_svm_dewarp("synthetic", True)
+    finish.set()
+
+    assert await task == {"front": b"corrected"}
+    assert preferences == [False, True]
+    assert len(notify) == 1
+    assert await result.async_get_svm_views("synthetic") == {"front": b"corrected"}
+    assert result.hass.async_add_executor_job.await_count == 2
+
+
+async def test_missing_capture_or_layout_does_not_submit_render_work():
+    result = coordinator()
+    assert await result.async_get_svm_views("synthetic") is None
+    assert result.get_svm_render_diagnostics() == [
+        {"state": "awaiting_capture", "view_count": 0}
+    ]
+    result._cache_svm_details(
+        "synthetic",
+        SimpleNamespace(captured_at=None, image_bytes=b"image", image_sizes=None),
+    )
+    assert await result.async_get_svm_views("synthetic") is None
+    assert result.get_svm_render_diagnostics() == [
+        {"state": "missing_image_or_layout", "view_count": 0}
+    ]
+    result.hass.async_add_executor_job.assert_not_awaited()

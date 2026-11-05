@@ -7,7 +7,6 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 import datetime as dt
 from datetime import timedelta
-from functools import partial
 import logging
 from typing import Any, Literal, TypeVar
 
@@ -43,7 +42,6 @@ from ._api.exceptions import (
     RequestTimeoutError,
     UnsupportedControlError,
 )
-from ._api.svm_image import render_views
 from .const import (
     CONF_ENABLE_GEOLOCATION_ENTITY,
     CONF_FORCE_REFRESH_INTERVAL,
@@ -60,6 +58,7 @@ from .const import (
     DOMAIN,
     OffPeakChargingMode,
 )
+from .svm_cache import SVMImageCache
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -85,23 +84,7 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def __init__(self, hass: HomeAssistant, config_entry: ConfigEntry) -> None:
         """Initialize."""
-        self._action_lock = asyncio.Lock()
-        self._shutdown_started = False
-        self._shutdown_task: asyncio.Task[None] | None = None
-        self._api_jobs: set[asyncio.Future[Any]] = set()
-        self._svm_details: dict[str, SVMDetails] = {}
-        # Per-vehicle SVM fisheye dewarp toggle (local UI state, off by default).
-        self._svm_dewarp: dict[str, bool] = {}
-        # Rendered SVM views cache: vehicle_id -> ((captured_at, dewarp), views).
-        # Invalidated by key change on a new capture or a switch toggle — no
-        # explicit invalidation hooks needed.
-        self._svm_views: dict[
-            str, tuple[tuple[dt.datetime | None, bool], dict[str, bytes]]
-        ] = {}
-        # Vehicles whose last poll failed with a vehicle-scoped API error.
-        self._failed_vehicles: set[str] = set()
-        # Consecutive failed polls per vehicle (drives the "skip it" hint).
-        self._vehicle_failures: dict[str, int] = {}
+        self._initialize_runtime_state()
 
         self.vehicle_manager = VehicleManager(
             username=config_entry.data[CONF_USERNAME],
@@ -153,20 +136,25 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.no_force_refresh_hour_start,
             self.no_force_refresh_hour_finish,
         )
+
+    def _initialize_runtime_state(self) -> None:
+        """Create owned state before scheduling any vehicle or camera work."""
+        self._action_lock = asyncio.Lock()
         self._closing = False
-        self._svm_received_at: dict[str, dt.datetime] = {}
-        self._svm_render_locks: dict[str, asyncio.Lock] = {}
-        self._svm_render_diagnostics: dict[str, dict[str, Any]] = {}
+        self._shutdown_started = False
+        self._shutdown_task: asyncio.Task[None] | None = None
+        self._api_jobs: set[asyncio.Future[Any]] = set()
+        self._svm = SVMImageCache()
+        self._failed_vehicles: set[str] = set()
+        self._vehicle_failures: dict[str, int] = {}
         self._post_command_watch_tasks: dict[str, asyncio.Task[None]] = {}
         self._post_command_watch_deadlines: dict[str, float] = {}
         self._post_command_watch_diagnostics: dict[str, dict[str, Any]] = {}
 
     async def _async_api_job(self, target: Callable[..., _T], *args: Any) -> _T:
         """Keep executor work owned until completion, even if its caller cancels."""
-        if getattr(self, "_shutdown_started", False):
+        if self._shutdown_started:
             raise HomeAssistantError("The integration is shutting down")
-        if not hasattr(self, "_api_jobs"):
-            self._api_jobs = set()
         job = asyncio.ensure_future(self.hass.async_add_executor_job(target, *args))
         self._api_jobs.add(job)
         job.add_done_callback(self._api_job_finished)
@@ -180,9 +168,7 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_close_manager(self) -> None:
         async with self._action_lock:
-            await asyncio.gather(
-                *getattr(self, "_api_jobs", ()), return_exceptions=True
-            )
+            await asyncio.gather(*self._api_jobs, return_exceptions=True)
             await self.hass.async_add_executor_job(self.vehicle_manager.close)
 
     async def _async_poll_data(self) -> dict[str, Any]:
@@ -355,11 +341,11 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def svm_dewarp_enabled(self, vehicle_id: str) -> bool:
         """Return the per-vehicle SVM fisheye dewarp preference."""
-        return self._svm_dewarp.get(vehicle_id, False)
+        return self._svm.dewarp_enabled(vehicle_id)
 
     def set_svm_dewarp(self, vehicle_id: str, enabled: bool) -> None:
         """Set the per-vehicle SVM fisheye dewarp preference."""
-        self._svm_dewarp[vehicle_id] = enabled
+        self._svm.set_dewarp(vehicle_id, enabled)
         # The render key changes with the toggle, but captured_at does not —
         # without this signal the image proxy keeps serving the pre-toggle
         # image until the next capture.
@@ -367,7 +353,7 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def get_cached_svm_details(self, vehicle_id: str) -> SVMDetails | None:
         """Return cached SVM details for a vehicle, or None if not yet fetched."""
-        return self._svm_details.get(vehicle_id)
+        return self._svm.get_details(vehicle_id)
 
     @callback
     def _sync_vehicle_enabled_states(self) -> None:
@@ -533,7 +519,7 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
 
     def _ensure_not_closing(self) -> None:
-        if getattr(self, "_closing", False):
+        if self._closing:
             raise HomeAssistantError("The integration is shutting down")
 
     def _require_remote_commands(self) -> None:
@@ -580,7 +566,7 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Share one shielded cleanup across explicit and HA unload callbacks."""
         self._closing = True
         self._shutdown_started = True
-        shutdown = getattr(self, "_shutdown_task", None)
+        shutdown = self._shutdown_task
         if shutdown is None:
             shutdown = self._shutdown_task = asyncio.create_task(
                 self._async_shutdown_resources(), name="HyundaiJP shutdown"
@@ -627,7 +613,7 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
 
     async def _async_update_data(self) -> dict[str, Any]:
-        if getattr(self, "_closing", False):
+        if self._closing:
             return self.data
         if self._action_lock.locked():
             return self.data
@@ -662,16 +648,11 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def get_svm_image_updated_at(self, vehicle_id: str) -> dt.datetime | None:
         """Return the capture time, or local receipt time when GPS time is absent."""
-        details = self.get_cached_svm_details(vehicle_id)
-        if details is None:
-            return None
-        return details.captured_at or self._svm_received_at.get(vehicle_id)
+        return self._svm.updated_at(vehicle_id)
 
     def _cache_svm_details(self, vehicle_id: str, details: SVMDetails) -> None:
         """Store a completed capture and invalidate previous rendered views."""
-        self._svm_details[vehicle_id] = details
-        self._svm_received_at[vehicle_id] = dt_util.utcnow()
-        self._svm_views.pop(vehicle_id, None)
+        self._svm.store(vehicle_id, details)
 
     async def async_get_svm_details(self, vehicle_id: str) -> SVMDetails:
         """Fetch the latest cached SVM image and metadata from the API."""
@@ -702,86 +683,14 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return details
 
     async def async_get_svm_views(self, vehicle_id: str) -> dict[str, bytes] | None:
-        """Return the 5 rendered SVM views (front/rear/left/right/top) as JPEG.
-
-        Renders once per (captured_at, dewarp switch) state: every image
-        entity serves from the same dict, and a new capture or a switch
-        toggle invalidates it by key change. The render runs in an executor
-        thread (dewarp is CPU-bound numpy work); render errors (e.g. missing
-        Pillow) propagate to the caller.
-        """
-        if not hasattr(self, "_svm_render_locks"):
-            self._svm_render_locks = {}
-            self._svm_render_diagnostics = {}
-        lock = self._svm_render_locks.setdefault(vehicle_id, asyncio.Lock())
-        async with lock:
-            while True:
-                details = self.get_cached_svm_details(vehicle_id)
-                if (
-                    details is None
-                    or not details.image_bytes
-                    or not details.image_sizes
-                ):
-                    self._svm_render_diagnostics[vehicle_id] = {
-                        "state": "awaiting_capture"
-                        if details is None
-                        else "missing_image_or_layout",
-                        "view_count": 0,
-                    }
-                    return None
-                key = (
-                    self.get_svm_image_updated_at(vehicle_id),
-                    self.svm_dewarp_enabled(vehicle_id),
-                )
-                cached = self._svm_views.get(vehicle_id)
-                if cached is not None and cached[0] == key:
-                    return cached[1]
-                self._svm_render_diagnostics[vehicle_id] = {
-                    "state": "rendering",
-                    "view_count": 0,
-                }
-                try:
-                    views: dict[str, bytes] = await self._async_run_executor_job(
-                        partial(render_views, details, dewarp=key[1])
-                    )
-                except Exception:
-                    self._svm_render_diagnostics[vehicle_id] = {
-                        "state": "failed",
-                        "view_count": 0,
-                        "failure_category": "render_failed",
-                    }
-                    raise HomeAssistantError(
-                        "Camera image could not be rendered"
-                    ) from None
-                if (
-                    self.get_cached_svm_details(vehicle_id) is not details
-                    or self.svm_dewarp_enabled(vehicle_id) != key[1]
-                ):
-                    continue
-                if not views:
-                    self._svm_render_diagnostics[vehicle_id] = {
-                        "state": "failed",
-                        "view_count": 0,
-                        "failure_category": "invalid_image_or_layout",
-                    }
-                    raise HomeAssistantError(
-                        "Camera image or layout could not be decoded"
-                    )
-                self._svm_views[vehicle_id] = (key, views)
-                self._svm_render_diagnostics[vehicle_id] = {
-                    "state": "complete",
-                    "view_count": len(views),
-                }
-                return views
+        """Render cached camera views through this coordinator's owned executor."""
+        return await self._svm.async_render_views(
+            vehicle_id, self._async_run_executor_job
+        )
 
     def get_svm_render_diagnostics(self) -> list[dict[str, Any]]:
         """Return local render outcomes without images or vehicle identifiers."""
-        return [
-            dict(summary)
-            for summary in list(getattr(self, "_svm_render_diagnostics", {}).values())[
-                :10
-            ]
-        ]
+        return self._svm.render_diagnostics()
 
     async def async_check_and_refresh_token(self) -> None:
         """Refresh token if needed via library."""
@@ -798,15 +707,11 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _start_post_command_state_watch(self, vehicle_id: str) -> None:
         """Watch only already-received MQTT data; never poll or wake the car."""
         if (
-            getattr(self, "_closing", False)
+            self._closing
             or vehicle_id not in self.vehicle_manager.vehicles
             or not self.vehicle_manager.vehicles[vehicle_id].enabled
         ):
             return
-        if not hasattr(self, "_post_command_watch_tasks"):
-            self._post_command_watch_tasks = {}
-            self._post_command_watch_deadlines = {}
-            self._post_command_watch_diagnostics = {}
         self._post_command_watch_deadlines[vehicle_id] = (
             self._post_command_watch_clock() + self._POST_COMMAND_WATCH_SECONDS
         )
@@ -830,7 +735,7 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_watch_post_command_state(self, vehicle_id: str) -> None:
         diagnostic = self._post_command_watch_diagnostics[vehicle_id]
         try:
-            while not getattr(self, "_closing", False):
+            while not self._closing:
                 remaining = (
                     self._post_command_watch_deadlines[vehicle_id]
                     - self._post_command_watch_clock()
@@ -842,7 +747,7 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     diagnostic["last_result"] = "operation_busy"
                 else:
                     async with self._action_lock:
-                        if getattr(self, "_closing", False):
+                        if self._closing:
                             return
                         vehicle = self.vehicle_manager.vehicles.get(vehicle_id)
                         if vehicle is None:
@@ -889,7 +794,7 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._post_command_watch_deadlines.pop(vehicle_id, None)
 
     async def _async_stop_post_command_state_watchers(self) -> None:
-        tasks = list(getattr(self, "_post_command_watch_tasks", {}).values())
+        tasks = list(self._post_command_watch_tasks.values())
         for task in tasks:
             task.cancel()
         if tasks:
@@ -899,9 +804,7 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Expose only bounded counters, not vehicle identifiers or payloads."""
         return [
             dict(value)
-            for value in list(
-                getattr(self, "_post_command_watch_diagnostics", {}).values()
-            )[:10]
+            for value in list(self._post_command_watch_diagnostics.values())[:10]
         ]
 
     def _check_command_confirmation(self, status: ORDER_STATUS | None) -> None:

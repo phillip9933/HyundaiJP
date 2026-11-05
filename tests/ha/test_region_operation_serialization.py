@@ -14,6 +14,7 @@ from custom_components.hyundai_jp.coordinator import JapanDataUpdateCoordinator
 
 def coordinator():
     result = JapanDataUpdateCoordinator.__new__(JapanDataUpdateCoordinator)
+    result._initialize_runtime_state()
     result.vehicle_manager = MagicMock()
     result.vehicle_manager.api = SimpleNamespace(
         requires_command_confirmation=True,
@@ -35,9 +36,7 @@ def coordinator():
     result.async_check_and_refresh_token = AsyncMock()
     result.async_set_updated_data = MagicMock()
     result.async_refresh = AsyncMock()
-    result._svm_details = {}
-    result._svm_received_at = {}
-    result._svm_views = {}
+
     return result
 
 

@@ -27,6 +27,7 @@ def stop_polling(monkeypatch):
 
 def coordinator(manager):
     result = JapanDataUpdateCoordinator.__new__(JapanDataUpdateCoordinator)
+    result._initialize_runtime_state()
     result.hass = SimpleNamespace(
         async_add_executor_job=AsyncMock(side_effect=lambda target: target())
     )

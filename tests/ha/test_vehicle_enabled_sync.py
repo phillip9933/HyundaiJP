@@ -31,6 +31,8 @@ def _sync(
     monkeypatch.setattr(coordinator_module.dr, "async_get", lambda _: registry)
 
     coordinator = JapanDataUpdateCoordinator.__new__(JapanDataUpdateCoordinator)
+
+    coordinator._initialize_runtime_state()
     coordinator.hass = MagicMock()
     coordinator.config_entry = SimpleNamespace(entry_id="synthetic-entry")
     coordinator.vehicle_manager = manager
