@@ -98,6 +98,7 @@ class HyundaiBluelinkApi(JapanCommandsMixin, JapanSVM, JapanAuthClient):
         ] = {}
         self._mqtt_sessions_lock = threading.RLock()
         self._mqtt_closed = False
+        self._mqtt_retiring = False
         self._mqtt_transport_pool = JapanMqttTransportPool()
         self._passive_state_observed_at: dict[str, dt.datetime] = {}
 
@@ -113,10 +114,21 @@ class HyundaiBluelinkApi(JapanCommandsMixin, JapanSVM, JapanAuthClient):
         self._command_vehicle_id(vehicle)
         identity = (token.access_token, token.device_id, token.mqtt_registration_uuid)
         retired = []
+        primary_error: BaseException | None = None
         try:
             with self._mqtt_sessions_lock:
                 if self._mqtt_closed:
                     raise APIError("Japan API session is closed")
+                if self._mqtt_retiring:
+                    existing = self._mqtt_sessions.get(vehicle.id)
+                    if (
+                        existing is not None
+                        and existing[0] == identity
+                        and existing[1].closed is not True
+                        and existing[1].failed is not True
+                    ):
+                        return existing[1]
+                    raise APIError("Japan MQTT session cleanup is in progress")
                 for vehicle_id, (saved, previous) in list(self._mqtt_sessions.items()):
                     if saved != identity:
                         retired.append(previous)
@@ -128,6 +140,7 @@ class HyundaiBluelinkApi(JapanCommandsMixin, JapanSVM, JapanAuthClient):
                     retired.append(existing[1])
                     del self._mqtt_sessions[vehicle.id]
                     existing = None
+                self._mqtt_retiring = bool(retired)
                 if existing is None:
                     helper = JapanMqttSession(
                         token,
@@ -140,10 +153,26 @@ class HyundaiBluelinkApi(JapanCommandsMixin, JapanSVM, JapanAuthClient):
                     self._mqtt_sessions[vehicle.id] = (identity, helper)
                 else:
                     helper = existing[1]
+        except BaseException as error:
+            primary_error = error
+            raise
         finally:
             # Disconnect callbacks may re-enter the manager and factory.
-            for previous in retired:
-                previous.close()
+            try:
+                with ExitStack() as cleanup:
+                    for previous in reversed(retired):
+                        cleanup.callback(previous.close)
+            except Exception as error:
+                if primary_error is None:
+                    raise
+                _LOGGER.warning(
+                    "Retired MQTT cleanup failed after session setup failure (%s)",
+                    type(error).__name__,
+                )
+            finally:
+                if retired:
+                    with self._mqtt_sessions_lock:
+                        self._mqtt_retiring = False
         return helper
 
     @staticmethod
