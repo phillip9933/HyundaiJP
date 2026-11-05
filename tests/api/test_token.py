@@ -1,7 +1,7 @@
 """Token serialization."""
 
-import datetime as dt
 from dataclasses import asdict
+import datetime as dt
 
 from custom_components.hyundai_jp._api.Token import Token
 
