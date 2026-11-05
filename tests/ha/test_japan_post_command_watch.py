@@ -5,11 +5,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 from custom_components.hyundai_jp.coordinator import JapanDataUpdateCoordinator
-from tests.ha.test_region_operation_serialization import coordinator
+from tests.ha.helpers import make_operation_coordinator
 
 
 def watcher():
-    result = coordinator()
+    result = make_operation_coordinator()
     vehicle = SimpleNamespace(id="synthetic", is_locked=True, enabled=True)
     reader = Mock(return_value=False)
     result.vehicle_manager.api = SimpleNamespace(

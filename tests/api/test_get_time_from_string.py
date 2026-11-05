@@ -5,26 +5,16 @@ departure/off-peak timer is configured; the parser must return None
 instead of raising ValueError. Also covers the preexisting timesection=None
 TypeError and defense-in-depth against unexpected formats.
 
-EU, AU, IN, and CN all inherit the base implementation (the CN and IN
-overrides were removed as bit-for-bit duplicates).
+The parser is independent of authentication, HTTP sessions and HA setup.
 """
 
 import datetime as dt
 
 import pytest
 
-from custom_components.hyundai_jp._api.telemetry import JapanTelemetry
 
-
-@pytest.fixture
-def type1_api() -> JapanTelemetry:
-    # Instantiate without __init__ to avoid network/credential setup.
-    api = JapanTelemetry()
-    return api
-
-
-class TestGetTypeFromStringBase:
-    """Covers EU, AU, IN, CN (all inherit the base)."""
+class TestDepartureTimeParsing:
+    """Japan legacy timer values map to a time or remain unset."""
 
     @pytest.mark.parametrize(
         "value,timesection,expected",
@@ -47,5 +37,5 @@ class TestGetTypeFromStringBase:
             ("ABCD", 0, None),
         ],
     )
-    def test_parse(self, type1_api, value, timesection, expected):
-        assert type1_api._get_time_from_string(value, timesection) == expected
+    def test_parse(self, telemetry_parser, value, timesection, expected):
+        assert telemetry_parser._get_time_from_string(value, timesection) == expected

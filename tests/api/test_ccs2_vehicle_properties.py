@@ -11,19 +11,10 @@ import json
 import pytest
 
 from custom_components.hyundai_jp._api.const import PressureUnit
-from custom_components.hyundai_jp._api.telemetry import JapanTelemetry
 from custom_components.hyundai_jp._api.Vehicle import Vehicle
 from tests.api.fixture_helpers import discover_fixtures, load_fixture
 
 CCS2_FIXTURE_FILES = discover_fixtures("ccs2_ev9_")
-
-
-@pytest.fixture
-def ccs2_api() -> JapanTelemetry:
-    api = JapanTelemetry()
-    api.data_timezone = None
-    api.temperature_range = [x * 0.5 for x in range(28, 60)]
-    return api
 
 
 @pytest.fixture
@@ -65,16 +56,16 @@ def _window_state(open_front_left=0, open_level_front_left=0, **levels) -> dict:
 class TestCCS2WindowOpenLevel:
     """CCS2 vents report Open=0, OpenLevel>0 and must parse as open (#1215)."""
 
-    def test_closed_windows_are_false(self, ccs2_api, vehicle):
-        ccs2_api._update_vehicle_properties_ccs2(vehicle, _window_state())
+    def test_closed_windows_are_false(self, telemetry_parser, vehicle):
+        telemetry_parser._update_vehicle_properties_ccs2(vehicle, _window_state())
         assert vehicle.front_left_window_is_open is False
         assert vehicle.front_right_window_is_open is False
         assert vehicle.back_left_window_is_open is False
         assert vehicle.back_right_window_is_open is False
 
-    def test_vented_window_is_open(self, ccs2_api, vehicle):
+    def test_vented_window_is_open(self, telemetry_parser, vehicle):
         # Vent: Open=0, OpenLevel=1 (issue #1215 reproduction)
-        ccs2_api._update_vehicle_properties_ccs2(
+        telemetry_parser._update_vehicle_properties_ccs2(
             vehicle, _window_state(open_level_front_left=1, open_level_front_right=1)
         )
         assert vehicle.front_left_window_is_open is True
@@ -82,17 +73,17 @@ class TestCCS2WindowOpenLevel:
         assert vehicle.back_left_window_is_open is False
         assert vehicle.back_right_window_is_open is False
 
-    def test_fully_open_window_is_open(self, ccs2_api, vehicle):
-        ccs2_api._update_vehicle_properties_ccs2(
+    def test_fully_open_window_is_open(self, telemetry_parser, vehicle):
+        telemetry_parser._update_vehicle_properties_ccs2(
             vehicle, _window_state(open_front_left=1, open_back_right=1)
         )
         assert vehicle.front_left_window_is_open is True
         assert vehicle.back_right_window_is_open is True
 
-    def test_missing_window_fields_are_none(self, ccs2_api, vehicle):
+    def test_missing_window_fields_are_none(self, telemetry_parser, vehicle):
         data = load_fixture(CCS2_FIXTURE_FILES[0])
         del data["Cabin"]["Window"]
-        ccs2_api._update_vehicle_properties_ccs2(vehicle, data)
+        telemetry_parser._update_vehicle_properties_ccs2(vehicle, data)
         assert vehicle.front_left_window_is_open is None
         assert vehicle.back_right_window_is_open is None
 
@@ -124,10 +115,10 @@ def ccs2_state_new_fields():
     return state
 
 
-def test_tire_pressure_values_bar(ccs2_api, vehicle, ccs2_state_new_fields):
+def test_tire_pressure_values_bar(telemetry_parser, vehicle, ccs2_state_new_fields):
     # Confirmed live (EU Santa Fe 2026, car display unit = bar, PressureUnit=2):
     # raw 27/27/27/26 -> 2.7/2.7/2.7/2.6 bar (raw x 0.1).
-    ccs2_api._update_vehicle_properties_ccs2(vehicle, ccs2_state_new_fields)
+    telemetry_parser._update_vehicle_properties_ccs2(vehicle, ccs2_state_new_fields)
     assert vehicle.tire_pressure_front_left == 2.7
     assert vehicle.tire_pressure_front_right == 2.7
     assert vehicle.tire_pressure_rear_left == 2.7
@@ -137,7 +128,7 @@ def test_tire_pressure_values_bar(ccs2_api, vehicle, ccs2_state_new_fields):
     assert vehicle.tire_pressure_rear_right_unit == "bar"
 
 
-def test_tire_pressure_values_psi(ccs2_api, vehicle, ccs2_state_new_fields):
+def test_tire_pressure_values_psi(telemetry_parser, vehicle, ccs2_state_new_fields):
     # Confirmed live (car display unit = psi, PressureUnit=0): raw 38/38/37/36
     # -> 38/38/37/36 psi (raw x 1, integer psi). Model B (raw unit-dependent).
     axle = ccs2_state_new_fields["Chassis"]["Axle"]
@@ -146,7 +137,7 @@ def test_tire_pressure_values_psi(ccs2_api, vehicle, ccs2_state_new_fields):
     axle["Row1"]["Right"]["Tire"]["Pressure"] = 38
     axle["Row2"]["Left"]["Tire"]["Pressure"] = 37
     axle["Row2"]["Right"]["Tire"]["Pressure"] = 36
-    ccs2_api._update_vehicle_properties_ccs2(vehicle, ccs2_state_new_fields)
+    telemetry_parser._update_vehicle_properties_ccs2(vehicle, ccs2_state_new_fields)
     assert vehicle.tire_pressure_front_left == 38.0
     assert vehicle.tire_pressure_front_right == 38.0
     assert vehicle.tire_pressure_rear_left == 37.0
@@ -155,7 +146,7 @@ def test_tire_pressure_values_psi(ccs2_api, vehicle, ccs2_state_new_fields):
     assert vehicle.tire_pressure_front_left_unit == "psi"
 
 
-def test_tire_pressure_values_kpa(ccs2_api, vehicle, ccs2_state_new_fields):
+def test_tire_pressure_values_kpa(telemetry_parser, vehicle, ccs2_state_new_fields):
     # Live-confirmed 2026-07-02: PressureUnit=1 (kPa), raw in 5-kPa steps.
     # Dashboard 255/255/255/250 kPa -> raw 51/51/51/50 -> value = raw x 5 = kPa.
     axle = ccs2_state_new_fields["Chassis"]["Axle"]
@@ -164,21 +155,23 @@ def test_tire_pressure_values_kpa(ccs2_api, vehicle, ccs2_state_new_fields):
     axle["Row1"]["Right"]["Tire"]["Pressure"] = 51
     axle["Row2"]["Left"]["Tire"]["Pressure"] = 51
     axle["Row2"]["Right"]["Tire"]["Pressure"] = 50
-    ccs2_api._update_vehicle_properties_ccs2(vehicle, ccs2_state_new_fields)
+    telemetry_parser._update_vehicle_properties_ccs2(vehicle, ccs2_state_new_fields)
     assert vehicle.tire_pressure_front_left == 255.0
     assert vehicle.tire_pressure_rear_right == 250.0
     assert vehicle.tire_pressure_unit == PressureUnit.KPA
     assert vehicle.tire_pressure_front_left_unit == "kPa"
 
 
-def test_tire_pressure_missing_leaves_none(ccs2_api, vehicle, ccs2_state_new_fields):
+def test_tire_pressure_missing_leaves_none(
+    telemetry_parser, vehicle, ccs2_state_new_fields
+):
     # Older CCS2 responses (e.g. EU EV9 2024) report PressureLow but no Pressure
     # and no PressureUnit -> values + units stay None (entity not created).
     for row in ("Row1", "Row2"):
         for side in ("Left", "Right"):
             ccs2_state_new_fields["Chassis"]["Axle"][row][side]["Tire"].pop("Pressure")
     ccs2_state_new_fields["Chassis"]["Axle"]["Tire"].pop("PressureUnit")
-    ccs2_api._update_vehicle_properties_ccs2(vehicle, ccs2_state_new_fields)
+    telemetry_parser._update_vehicle_properties_ccs2(vehicle, ccs2_state_new_fields)
     assert vehicle.tire_pressure_front_left is None
     assert vehicle.tire_pressure_front_right is None
     assert vehicle.tire_pressure_rear_left is None
@@ -188,7 +181,7 @@ def test_tire_pressure_missing_leaves_none(ccs2_api, vehicle, ccs2_state_new_fie
 
 
 def test_tire_pressure_unknown_unit_does_not_crash(
-    ccs2_api, vehicle, ccs2_state_new_fields
+    telemetry_parser, vehicle, ccs2_state_new_fields
 ):
     # Some vehicles return a PressureUnit not in the enum (e.g. 3 — see API #1230,
     # kia_uvo #1784/#1785). An unknown unit must NOT raise ValueError and break the
@@ -200,7 +193,7 @@ def test_tire_pressure_unknown_unit_does_not_crash(
     ccs2_state_new_fields["Chassis"]["Axle"]["Row2"]["Left"]["Tire"]["Pressure"] = 27
     ccs2_state_new_fields["Chassis"]["Axle"]["Row2"]["Right"]["Tire"]["Pressure"] = 26
     # Must not raise.
-    ccs2_api._update_vehicle_properties_ccs2(vehicle, ccs2_state_new_fields)
+    telemetry_parser._update_vehicle_properties_ccs2(vehicle, ccs2_state_new_fields)
     assert vehicle.tire_pressure_unit is None
     assert vehicle.tire_pressure_front_left is None
     assert vehicle.tire_pressure_front_right is None
@@ -210,7 +203,7 @@ def test_tire_pressure_unknown_unit_does_not_crash(
 
 
 def test_tire_pressure_sensor_sentinel_is_unknown(
-    ccs2_api, vehicle, ccs2_state_new_fields
+    telemetry_parser, vehicle, ccs2_state_new_fields
 ):
     # When the TPMS hasn't reported (car off / before driving), the API returns
     # raw Pressure = 255 (0xFF) for all tires — a "no reading" sentinel, NOT a
@@ -222,60 +215,62 @@ def test_tire_pressure_sensor_sentinel_is_unknown(
     for row in ("Row1", "Row2"):
         for side in ("Left", "Right"):
             axle[row][side]["Tire"]["Pressure"] = 255
-    ccs2_api._update_vehicle_properties_ccs2(vehicle, ccs2_state_new_fields)
+    telemetry_parser._update_vehicle_properties_ccs2(vehicle, ccs2_state_new_fields)
     assert vehicle.tire_pressure_unit == PressureUnit.BAR
     assert vehicle.tire_pressure_front_left is None
     assert vehicle.tire_pressure_front_right is None
     assert vehicle.tire_pressure_rear_left is None
     assert vehicle.tire_pressure_rear_right is None
-    ccs2_api._update_vehicle_properties_ccs2(vehicle, ccs2_state_new_fields)
+    telemetry_parser._update_vehicle_properties_ccs2(vehicle, ccs2_state_new_fields)
     assert vehicle.drive_mode == "Eco"
 
 
-def test_oil_level_warning_false(ccs2_api, vehicle, ccs2_state_new_fields):
-    ccs2_api._update_vehicle_properties_ccs2(vehicle, ccs2_state_new_fields)
+def test_oil_level_warning_false(telemetry_parser, vehicle, ccs2_state_new_fields):
+    telemetry_parser._update_vehicle_properties_ccs2(vehicle, ccs2_state_new_fields)
     assert vehicle.oil_level_warning_is_on is False
 
 
 def test_oil_level_warning_missing_leaves_none(
-    ccs2_api, vehicle, ccs2_state_new_fields
+    telemetry_parser, vehicle, ccs2_state_new_fields
 ):
     # No OilLevelWarning -> attribute stays None (entity not created downstream).
     del ccs2_state_new_fields["Drivetrain"]["InternalCombustionEngine"][
         "OilLevelWarning"
     ]
-    ccs2_api._update_vehicle_properties_ccs2(vehicle, ccs2_state_new_fields)
+    telemetry_parser._update_vehicle_properties_ccs2(vehicle, ccs2_state_new_fields)
     assert vehicle.oil_level_warning_is_on is None
 
 
-def test_battery_auxiliary_fail_warning_false(ccs2_api, vehicle, ccs2_state_new_fields):
-    ccs2_api._update_vehicle_properties_ccs2(vehicle, ccs2_state_new_fields)
+def test_battery_auxiliary_fail_warning_false(
+    telemetry_parser, vehicle, ccs2_state_new_fields
+):
+    telemetry_parser._update_vehicle_properties_ccs2(vehicle, ccs2_state_new_fields)
     assert vehicle.battery_auxiliary_fail_warning_is_on is False
 
 
 def test_battery_auxiliary_fail_warning_missing_leaves_none(
-    ccs2_api, vehicle, ccs2_state_new_fields
+    telemetry_parser, vehicle, ccs2_state_new_fields
 ):
     # No FailWarning -> attribute stays None (entity not created downstream).
     del ccs2_state_new_fields["Electronics"]["Battery"]["Auxiliary"]["FailWarning"]
-    ccs2_api._update_vehicle_properties_ccs2(vehicle, ccs2_state_new_fields)
+    telemetry_parser._update_vehicle_properties_ccs2(vehicle, ccs2_state_new_fields)
     assert vehicle.battery_auxiliary_fail_warning_is_on is None
 
 
-def test_power_supply_sleep_mapped(ccs2_api, vehicle, ccs2_state_new_fields):
+def test_power_supply_sleep_mapped(telemetry_parser, vehicle, ccs2_state_new_fields):
     # CCS2 gap vs CA/IN flat: accessory_on/ign3/sleep_mode_check mapped.
-    ccs2_api._update_vehicle_properties_ccs2(vehicle, ccs2_state_new_fields)
+    telemetry_parser._update_vehicle_properties_ccs2(vehicle, ccs2_state_new_fields)
     assert vehicle.accessory_on is True
     assert vehicle.ign3 is True
     assert vehicle.sleep_mode_check is False
 
 
 def test_power_supply_sleep_missing_leaves_none(
-    ccs2_api, vehicle, ccs2_state_new_fields
+    telemetry_parser, vehicle, ccs2_state_new_fields
 ):
     ccs2_state_new_fields.pop("Electronics", None)
     ccs2_state_new_fields.pop("RemoteControl", None)
-    ccs2_api._update_vehicle_properties_ccs2(vehicle, ccs2_state_new_fields)
+    telemetry_parser._update_vehicle_properties_ccs2(vehicle, ccs2_state_new_fields)
     assert vehicle.accessory_on is None
     assert vehicle.ign3 is None
     assert vehicle.sleep_mode_check is None
@@ -286,36 +281,37 @@ class TestCCS2LocationTimestampNone:
     location_last_updated_at None, not a 2000-01-01 sentinel ("27 years ago").
     """
 
-    def test_location_timestamp_none_yields_none(self, ccs2_api, vehicle):
+    def test_location_timestamp_none_yields_none(self, telemetry_parser, vehicle):
         data = load_fixture(CCS2_FIXTURE_FILES[0])
         del data["Location"]["TimeStamp"]
-        ccs2_api._update_vehicle_properties_ccs2(vehicle, data)
+        telemetry_parser._update_vehicle_properties_ccs2(vehicle, data)
         assert vehicle.location_latitude == 48.8566
         assert vehicle.location_longitude == 2.3522
         assert vehicle.location_last_updated_at is None
 
-    def test_location_timestamp_present_yields_datetime(self, ccs2_api, vehicle):
+    def test_location_timestamp_present_yields_datetime(
+        self, telemetry_parser, vehicle
+    ):
         data = load_fixture(CCS2_FIXTURE_FILES[0])
-        ccs2_api._update_vehicle_properties_ccs2(vehicle, data)
+        telemetry_parser._update_vehicle_properties_ccs2(vehicle, data)
         ts = vehicle.location_last_updated_at
         assert ts is not None
-        assert ts.year == 2024 and ts.month == 9 and ts.day == 15
-        assert ts.hour == 14 and ts.minute == 0 and ts.second == 0
+        assert ts.astimezone(dt.UTC) == dt.datetime(2024, 9, 15, 14, tzinfo=dt.UTC)
 
 
-def test_ccs2_unknown_off_peak_mode_is_graceful(ccs2_api, vehicle):
+def test_ccs2_unknown_off_peak_mode_is_graceful(telemetry_parser, vehicle):
     """Unknown OffPeakTime.Mode (e.g. reserved 1) -> attrs None, no crash."""
     data = load_fixture("ccs2_ev6_2024_ccs2_off.json")
     data = json.loads(json.dumps(data))  # deep copy
     data["Green"]["Reservation"]["OffPeakTime"]["Mode"] = 1
-    ccs2_api._update_vehicle_properties_ccs2(vehicle, data)
+    telemetry_parser._update_vehicle_properties_ccs2(vehicle, data)
     assert vehicle.ev_schedule_charge_enabled is None
     assert vehicle.ev_off_peak_charge_only_enabled is None
     # window still parsed even if Mode unknown
     assert vehicle.ev_off_peak_start_time == dt.time(22, 30)
 
 
-def test_ccs2_off_peak_sentinel_31_70_is_none_silent(ccs2_api, vehicle, caplog):
+def test_ccs2_off_peak_sentinel_31_70_is_none_silent(telemetry_parser, vehicle, caplog):
     """OffPeakTime 31:70 sentinel (Kia EV3 AU/EU, #1269) -> None, no warning.
 
     The "unconfigured" default StartHour=31/StartMin=70/EndHour=31/EndMin=70
@@ -338,7 +334,7 @@ def test_ccs2_off_peak_sentinel_31_70_is_none_silent(ccs2_api, vehicle, caplog):
     import logging
 
     with caplog.at_level(logging.WARNING, logger="custom_components.hyundai_jp._api"):
-        ccs2_api._update_vehicle_properties_ccs2(vehicle, data)
+        telemetry_parser._update_vehicle_properties_ccs2(vehicle, data)
     assert vehicle.ev_off_peak_start_time is None
     assert vehicle.ev_off_peak_end_time is None
     assert vehicle.ev_schedule_charge_enabled is False  # Mode=0

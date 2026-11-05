@@ -13,7 +13,7 @@ import pytest
 from custom_components import hyundai_jp
 from custom_components.hyundai_jp.const import DOMAIN
 from custom_components.hyundai_jp.coordinator import JapanDataUpdateCoordinator
-from tests.ha.test_manager_cleanup import coordinator
+from tests.ha.helpers import make_cleanup_coordinator
 
 
 @pytest.mark.parametrize("polling_fails", [False, True])
@@ -32,7 +32,7 @@ async def test_overlapping_and_repeated_shutdown_share_one_result(
     polling = AsyncMock(side_effect=stop_polling)
     monkeypatch.setattr(DataUpdateCoordinator, "async_shutdown", polling)
     close = Mock()
-    owner = coordinator(SimpleNamespace(close=close))
+    owner = make_cleanup_coordinator(SimpleNamespace(close=close))
     watchers = AsyncMock()
     owner._async_stop_post_command_state_watchers = watchers
     first = asyncio.create_task(owner.async_shutdown())
@@ -70,7 +70,7 @@ async def test_cancelling_one_shutdown_waiter_keeps_worker_and_shared_owner(
     monkeypatch.setattr(DataUpdateCoordinator, "async_shutdown", AsyncMock())
     entered, release = asyncio.Event(), asyncio.Event()
     close = Mock()
-    owner = coordinator(SimpleNamespace(close=close))
+    owner = make_cleanup_coordinator(SimpleNamespace(close=close))
     target = Mock()
 
     async def execute(operation):
@@ -128,7 +128,7 @@ async def test_polling_failure_still_cancels_watchers_before_closing_manager(
             stopped.set()
 
     close = Mock(side_effect=lambda: events.append("manager_closed"))
-    owner = coordinator(SimpleNamespace(close=close))
+    owner = make_cleanup_coordinator(SimpleNamespace(close=close))
     watcher = asyncio.create_task(watch())
     owner._post_command_watch_tasks = {"synthetic": watcher}
     await entered.wait()
@@ -152,7 +152,7 @@ async def test_cleanup_failure_attempts_remaining_stages_with_redacted_logs(
     monkeypatch.setattr(DataUpdateCoordinator, "async_shutdown", polling)
     error = RuntimeError("PRIVATE_FIRST_FAILURE")
     close = Mock(side_effect=error if stage.startswith("manager") else None)
-    owner = coordinator(SimpleNamespace(close=close))
+    owner = make_cleanup_coordinator(SimpleNamespace(close=close))
     watchers = AsyncMock(side_effect=error if stage == "watchers" else None)
     owner._async_stop_post_command_state_watchers = watchers
     if stage == "manager_and_api":

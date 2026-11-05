@@ -1,4 +1,4 @@
-"""Japan command filtering must not alter established regional platforms."""
+"""Japan capabilities control which vehicle commands appear in HA."""
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -9,12 +9,11 @@ import pytest
 from custom_components.hyundai_jp import button, climate, lock, number, switch
 from custom_components.hyundai_jp._api import Vehicle
 from custom_components.hyundai_jp.coordinator import JapanDataUpdateCoordinator
-from tests.ha.conftest import make_coordinator, make_hass
+from tests.ha.helpers import make_coordinator, make_hass, make_runtime_coordinator
 
 
 async def test_japan_rejects_unsupported_service_before_authentication():
-    result = JapanDataUpdateCoordinator.__new__(JapanDataUpdateCoordinator)
-    result._initialize_runtime_state()
+    result = make_runtime_coordinator()
     result.vehicle_manager = MagicMock()
     result.vehicle_manager.api = SimpleNamespace(
         supported_commands=frozenset({"lock_action"})

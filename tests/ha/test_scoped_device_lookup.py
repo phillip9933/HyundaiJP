@@ -10,6 +10,7 @@ from custom_components.hyundai_jp import coordinator as coordinator_module
 from custom_components.hyundai_jp._api import Vehicle, VehicleManager
 from custom_components.hyundai_jp.const import DOMAIN
 from custom_components.hyundai_jp.coordinator import JapanDataUpdateCoordinator
+from tests.ha.helpers import make_runtime_coordinator
 
 VIN = "SYNTHETIC_SHARED_VIN"
 
@@ -45,8 +46,7 @@ def _coordinator(
 ) -> JapanDataUpdateCoordinator:
     manager = VehicleManager.__new__(VehicleManager)
     manager.vehicles = {vehicle.id: vehicle}
-    coordinator = JapanDataUpdateCoordinator.__new__(JapanDataUpdateCoordinator)
-    coordinator._initialize_runtime_state()
+    coordinator = make_runtime_coordinator()
     coordinator.hass = Mock()
     # entry_id scopes registry ownership; unique_id is deliberately different.
     coordinator.config_entry = SimpleNamespace(

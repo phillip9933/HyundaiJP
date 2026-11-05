@@ -7,11 +7,11 @@ from unittest.mock import AsyncMock
 from homeassistant.exceptions import HomeAssistantError
 import pytest
 
-from tests.ha.test_region_operation_serialization import coordinator
+from tests.ha.helpers import make_operation_coordinator
 
 
 async def test_cancelled_command_keeps_lock_through_confirmation():
-    result = coordinator()
+    result = make_operation_coordinator()
     submitted = asyncio.Event()
     finished = asyncio.Event()
     result.hass.async_add_executor_job.return_value = "synthetic-action"
@@ -39,7 +39,7 @@ async def test_cancelled_command_keeps_lock_through_confirmation():
 
 
 async def test_cancelled_capture_still_caches_completed_image():
-    result = coordinator()
+    result = make_operation_coordinator()
     started = asyncio.Event()
     finished = asyncio.Event()
     details = SimpleNamespace(captured_at=None, image_bytes=b"synthetic")
@@ -64,7 +64,7 @@ async def test_cancelled_capture_still_caches_completed_image():
 
 
 async def test_cancelled_executor_failure_is_drained_before_releasing_lock():
-    result = coordinator()
+    result = make_operation_coordinator()
     started = asyncio.Event()
     finished = asyncio.Event()
 

@@ -33,7 +33,6 @@ None guard).
 
 import pytest
 
-from custom_components.hyundai_jp._api.telemetry import JapanTelemetry
 from custom_components.hyundai_jp._api.Vehicle import Vehicle
 
 # Minimal CCS2 state envelope shared by all cases. Drivetrain.FuelSystem.DTE is
@@ -92,14 +91,6 @@ _HEV_WINTER_MODE_ON = _state(
 )
 
 
-@pytest.fixture
-def ccs2_api() -> JapanTelemetry:
-    api = JapanTelemetry()
-    api.data_timezone = None
-    api.temperature_range = [x * 0.5 for x in range(28, 60)]
-    return api
-
-
 class TestCCS2PreconditionSensor:
     """Precondition read from BatteryPreCondition.Status (EV) with
     WinterModeOperation fallback (HEV)."""
@@ -114,15 +105,17 @@ class TestCCS2PreconditionSensor:
             (6, False),
         ],
     )
-    def test_ioniq5_precondition_status_enum(self, ccs2_api, status, expected_enabled):
+    def test_ioniq5_precondition_status_enum(
+        self, telemetry_parser, status, expected_enabled
+    ):
         """EV: BatteryPreCondition.Status maps 0/2/6 -> off, 3/4 -> on."""
         vehicle = Vehicle(id="test-id")
-        ccs2_api._update_vehicle_properties_ccs2(vehicle, _ev_state(status))
+        telemetry_parser._update_vehicle_properties_ccs2(vehicle, _ev_state(status))
         assert vehicle.ev_battery_precondition_enabled is expected_enabled
         # Status present -> WinterModeOperation is not mapped to a boolean.
         assert vehicle.ev_battery_winter_mode is None
 
-    def test_ioniq6_ccnc_1823_dump_case(self, ccs2_api):
+    def test_ioniq6_ccnc_1823_dump_case(self, telemetry_parser):
         """kia_uvo #1823 exact dump (Ioniq 6 2026, ccNC).
 
         WinterModeOperation=1 alongside BatteryPreCondition.Status=2, with
@@ -141,12 +134,12 @@ class TestCCS2PreconditionSensor:
                 "BatteryRemain": {"Value": 109843.2, "Ratio": 42, "Unit": "kJ"},
             }
         )
-        ccs2_api._update_vehicle_properties_ccs2(vehicle, state)
+        telemetry_parser._update_vehicle_properties_ccs2(vehicle, state)
         assert vehicle.ev_battery_precondition_enabled is False
         assert vehicle.ev_battery_winter_mode is None
 
     def test_ioniq5_precondition_disabled_from_battery_precondition_status(
-        self, ccs2_api
+        self, telemetry_parser
     ):
         """EV (IONIQ 5): BatteryPreCondition.Status=0 -> precondition disabled.
 
@@ -154,23 +147,23 @@ class TestCCS2PreconditionSensor:
         preconditioning turned OFF in the myHyundai app, Status reads 0.
         """
         vehicle = Vehicle(id="test-id")
-        ccs2_api._update_vehicle_properties_ccs2(vehicle, _ev_state(0))
+        telemetry_parser._update_vehicle_properties_ccs2(vehicle, _ev_state(0))
         assert vehicle.ev_battery_precondition_enabled is False
         assert vehicle.ev_battery_winter_mode is None
 
-    def test_hev_precondition_falls_back_to_winter_mode_off(self, ccs2_api):
+    def test_hev_precondition_falls_back_to_winter_mode_off(self, telemetry_parser):
         """HEV: no BatteryPreCondition -> fallback to WinterModeOperation=0 ->
         False. No-regression guarantee: existing HEV behaviour is unchanged."""
         vehicle = Vehicle(id="test-id")
-        ccs2_api._update_vehicle_properties_ccs2(vehicle, _HEV_WINTER_MODE_OFF)
+        telemetry_parser._update_vehicle_properties_ccs2(vehicle, _HEV_WINTER_MODE_OFF)
         assert vehicle.ev_battery_precondition_enabled is False
         assert vehicle.ev_battery_winter_mode is False
 
-    def test_hev_precondition_falls_back_to_winter_mode_on(self, ccs2_api):
+    def test_hev_precondition_falls_back_to_winter_mode_on(self, telemetry_parser):
         """HEV: no BatteryPreCondition -> fallback to WinterModeOperation=1 ->
         True for both fields. No-regression guarantee for the armed case."""
         vehicle = Vehicle(id="test-id")
-        ccs2_api._update_vehicle_properties_ccs2(vehicle, _HEV_WINTER_MODE_ON)
+        telemetry_parser._update_vehicle_properties_ccs2(vehicle, _HEV_WINTER_MODE_ON)
         assert vehicle.ev_battery_precondition_enabled is True
         assert vehicle.ev_battery_winter_mode is True
 

@@ -15,7 +15,7 @@ import pytest
 
 from custom_components import hyundai_jp
 from custom_components.hyundai_jp.const import DOMAIN
-from custom_components.hyundai_jp.coordinator import JapanDataUpdateCoordinator
+from tests.ha.helpers import make_cleanup_coordinator, make_unload_context
 
 
 @pytest.fixture
@@ -23,36 +23,6 @@ def stop_polling(monkeypatch):
     result = AsyncMock()
     monkeypatch.setattr(DataUpdateCoordinator, "async_shutdown", result)
     return result
-
-
-def coordinator(manager):
-    result = JapanDataUpdateCoordinator.__new__(JapanDataUpdateCoordinator)
-    result._initialize_runtime_state()
-    result.hass = SimpleNamespace(
-        async_add_executor_job=AsyncMock(side_effect=lambda target: target())
-    )
-    if not hasattr(manager, "api"):
-        manager.api = SimpleNamespace(close=Mock())
-    owned_close = manager.close
-
-    def close_owned_api():
-        owned_close()
-        manager.api.close()
-
-    manager.close = Mock(side_effect=close_owned_api)
-    result.vehicle_manager = manager
-    result._action_lock = asyncio.Lock()
-    return result
-
-
-def unload_fixture(coordinator, *, platform_success=True):
-    hass = SimpleNamespace(
-        data={DOMAIN: {"synthetic-entry": coordinator}},
-        config_entries=SimpleNamespace(
-            async_unload_platforms=AsyncMock(return_value=platform_success)
-        ),
-    )
-    return hass, SimpleNamespace(unique_id="synthetic-entry")
 
 
 async def test_shutdown_waits_for_active_command_and_closes_off_loop(stop_polling):
@@ -71,7 +41,7 @@ async def test_shutdown_waits_for_active_command_and_closes_off_loop(stop_pollin
         events.append("manager_closed")
         close_threads.append(threading.get_ident())
 
-    result = coordinator(SimpleNamespace(close=close))
+    result = make_cleanup_coordinator(SimpleNamespace(close=close))
     result.hass.async_add_executor_job.side_effect = asyncio.to_thread
     async with result._action_lock:
         task = asyncio.create_task(result.async_shutdown())
@@ -87,9 +57,11 @@ async def test_shutdown_waits_for_active_command_and_closes_off_loop(stop_pollin
 async def test_successful_unload_closes_only_that_manager(monkeypatch, stop_polling):
     close = Mock()
     other_close = Mock()
-    result = coordinator(SimpleNamespace(close=close))
-    hass, entry = unload_fixture(result)
-    hass.data[DOMAIN]["other-entry"] = coordinator(SimpleNamespace(close=other_close))
+    result = make_cleanup_coordinator(SimpleNamespace(close=close))
+    hass, entry = make_unload_context(result)
+    hass.data[DOMAIN]["other-entry"] = make_cleanup_coordinator(
+        SimpleNamespace(close=other_close)
+    )
     services = Mock()
     monkeypatch.setattr(hyundai_jp, "async_unload_services", services)
 
@@ -103,8 +75,8 @@ async def test_successful_unload_closes_only_that_manager(monkeypatch, stop_poll
 
 async def test_failed_platform_unload_leaves_manager_running(stop_polling):
     close = Mock()
-    result = coordinator(SimpleNamespace(close=close))
-    hass, entry = unload_fixture(result, platform_success=False)
+    result = make_cleanup_coordinator(SimpleNamespace(close=close))
+    hass, entry = make_unload_context(result, platform_success=False)
 
     assert not await hyundai_jp.async_unload_entry(hass, entry)
 
@@ -116,10 +88,10 @@ async def test_failed_platform_unload_leaves_manager_running(stop_polling):
 async def test_cleanup_failure_is_sanitized_and_does_not_block_unload(
     monkeypatch, caplog, stop_polling
 ):
-    result = coordinator(
+    result = make_cleanup_coordinator(
         SimpleNamespace(close=Mock(side_effect=RuntimeError("PRIVATE_ACCOUNT_DATA")))
     )
-    hass, entry = unload_fixture(result)
+    hass, entry = make_unload_context(result)
     services = Mock()
     monkeypatch.setattr(hyundai_jp, "async_unload_services", services)
 
@@ -143,7 +115,7 @@ async def test_failed_first_refresh_cleans_up_and_preserves_auth_error(
     monkeypatch, stop_polling, error, expected
 ):
     close = Mock()
-    result = coordinator(SimpleNamespace(close=close))
+    result = make_cleanup_coordinator(SimpleNamespace(close=close))
     result.async_config_entry_first_refresh = AsyncMock(side_effect=error)
     monkeypatch.setattr(
         hyundai_jp, "JapanDataUpdateCoordinator", Mock(return_value=result)
@@ -163,7 +135,7 @@ async def test_manager_cleanup_runs_even_when_polling_shutdown_fails(stop_pollin
     error = RuntimeError("polling shutdown")
     stop_polling.side_effect = error
     close = Mock()
-    result = coordinator(SimpleNamespace(close=close))
+    result = make_cleanup_coordinator(SimpleNamespace(close=close))
 
     with pytest.raises(HomeAssistantError) as info:
         await result.async_shutdown()
@@ -181,7 +153,7 @@ async def test_shutdown_drains_active_poll_and_blocks_fallback(mode, stop_pollin
     cached = Mock()
     force = Mock()
     close = Mock(side_effect=lambda: events.append("closed"))
-    result = coordinator(
+    result = make_cleanup_coordinator(
         SimpleNamespace(
             close=close,
             update_vehicle_with_cached_state=cached,
@@ -231,7 +203,7 @@ async def test_cancelled_api_caller_keeps_worker_owned_until_shutdown(
     release = asyncio.Event()
     finished = []
     close = Mock()
-    result = coordinator(SimpleNamespace(close=close))
+    result = make_cleanup_coordinator(SimpleNamespace(close=close))
     target = Mock()
 
     async def execute(job):
@@ -264,7 +236,7 @@ async def test_cancelled_api_caller_keeps_worker_owned_until_shutdown(
 
 async def test_no_api_jobs_submitted_after_shutdown(stop_polling):
     close = Mock()
-    result = coordinator(SimpleNamespace(close=close))
+    result = make_cleanup_coordinator(SimpleNamespace(close=close))
     target = Mock()
     await result.async_shutdown()
 
@@ -282,7 +254,7 @@ async def test_cancelled_shutdown_still_drains_worker_and_closes(stop_polling):
     started = asyncio.Event()
     release = asyncio.Event()
     close = Mock()
-    result = coordinator(SimpleNamespace(close=close))
+    result = make_cleanup_coordinator(SimpleNamespace(close=close))
     target = Mock()
 
     async def execute(job):

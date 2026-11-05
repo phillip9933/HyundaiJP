@@ -8,11 +8,11 @@ import pytest
 from custom_components.hyundai_jp._api import Vehicle
 from custom_components.hyundai_jp._api.exceptions import ServiceTemporaryUnavailable
 from custom_components.hyundai_jp.coordinator import JapanDataUpdateCoordinator
-from tests.ha.test_region_operation_serialization import coordinator
+from tests.ha.helpers import make_operation_coordinator
 
 
 async def test_japan_cached_poll_preserves_upstream_vehicle_failure_isolation():
-    result = coordinator()
+    result = make_operation_coordinator()
     result.vehicle_manager.vehicles = {
         key: Vehicle(id=key, name=key) for key in ("failed", "healthy")
     }
@@ -38,7 +38,7 @@ async def test_japan_cached_poll_preserves_upstream_vehicle_failure_isolation():
 
 @pytest.mark.parametrize("method", ["async_update_all", "async_force_update_all"])
 async def test_japan_poll_cancellation_keeps_lock_until_upstream_work_finishes(method):
-    result = coordinator()
+    result = make_operation_coordinator()
     started, release = asyncio.Event(), asyncio.Event()
 
     async def poll(*, mode):
@@ -61,7 +61,7 @@ async def test_japan_poll_cancellation_keeps_lock_until_upstream_work_finishes(m
 
 
 async def test_japan_token_check_preserves_upstream_device_enabled_sync():
-    result = coordinator()
+    result = make_operation_coordinator()
     result._async_save_token = AsyncMock()
     result._sync_vehicle_enabled_states = Mock()
     await JapanDataUpdateCoordinator.async_check_and_refresh_token(result)

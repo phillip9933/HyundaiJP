@@ -1,34 +1,12 @@
 """Japan distinguishes service acceptance from physical completion and failures."""
 
-import asyncio
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 from homeassistant.exceptions import HomeAssistantError
 import pytest
 
 from custom_components.hyundai_jp._api.const import ORDER_STATUS
-from custom_components.hyundai_jp.coordinator import JapanDataUpdateCoordinator
-
-
-def coordinator():
-    result = JapanDataUpdateCoordinator.__new__(JapanDataUpdateCoordinator)
-    result._initialize_runtime_state()
-    result.vehicle_manager = MagicMock()
-    result.vehicle_manager.supported_commands = None
-    result.vehicle_manager.api = SimpleNamespace(
-        supports_remote_commands=True,
-        supports_force_refresh=True,
-        requires_command_confirmation=True,
-    )
-    result.hass = MagicMock()
-    result.hass.async_add_executor_job = AsyncMock()
-    result.async_check_and_refresh_token = AsyncMock()
-    result.async_refresh = AsyncMock()
-    result.async_set_updated_data = MagicMock()
-    result._action_lock = asyncio.Lock()
-    result.data = {}
-    return result
+from tests.ha.helpers import make_operation_coordinator
 
 
 @pytest.mark.parametrize(
@@ -45,7 +23,7 @@ async def test_unconfirmed_command_raises_after_refresh(monkeypatch, status):
     monkeypatch.setattr(
         "custom_components.hyundai_jp.coordinator.asyncio.sleep", AsyncMock()
     )
-    result = coordinator()
+    result = make_operation_coordinator()
     result.hass.async_add_executor_job.side_effect = ["SYNTHETIC_ID", status, None]
     with pytest.raises(HomeAssistantError, match="not confirmed"):
         await result.async_lock_vehicle("CAR")
@@ -59,7 +37,7 @@ async def test_confirmed_command_completes(monkeypatch):
     monkeypatch.setattr(
         "custom_components.hyundai_jp.coordinator.asyncio.sleep", AsyncMock()
     )
-    result = coordinator()
+    result = make_operation_coordinator()
     result.hass.async_add_executor_job.side_effect = [
         "SYNTHETIC_ID",
         ORDER_STATUS.SUCCESS,
@@ -76,7 +54,7 @@ async def test_forced_refresh_wait_also_checks_confirmation(monkeypatch):
     monkeypatch.setattr(
         "custom_components.hyundai_jp.coordinator.asyncio.sleep", AsyncMock()
     )
-    result = coordinator()
+    result = make_operation_coordinator()
     result.hass.async_add_executor_job.side_effect = [ORDER_STATUS.FAILED, None]
     with pytest.raises(HomeAssistantError, match="not confirmed"):
         await result.async_await_action_and_force_refresh("CAR", "SYNTHETIC_ID")
@@ -97,7 +75,7 @@ async def test_confirmation_error_preserves_specific_outcome(
     monkeypatch.setattr(
         "custom_components.hyundai_jp.coordinator.asyncio.sleep", AsyncMock()
     )
-    result = coordinator()
+    result = make_operation_coordinator()
     result.hass.async_add_executor_job.side_effect = ["SYNTHETIC_ID", status, None]
     with pytest.raises(HomeAssistantError, match=reason):
         await result.async_unlock_vehicle("CAR")
@@ -107,7 +85,7 @@ async def test_confirmation_error_preserves_specific_outcome(
 async def test_http_acceptance_completes_without_waiting_for_mqtt(monkeypatch):
     sleep = AsyncMock()
     monkeypatch.setattr("custom_components.hyundai_jp.coordinator.asyncio.sleep", sleep)
-    result = coordinator()
+    result = make_operation_coordinator()
     result.hass.async_add_executor_job.side_effect = [
         "SYNTHETIC_ID",
         ORDER_STATUS.ACCEPTED,
@@ -128,7 +106,7 @@ async def test_http_acceptance_completes_without_waiting_for_mqtt(monkeypatch):
 
 
 async def test_accepted_request_with_state_read_failure_is_labelled_accepted():
-    result = coordinator()
+    result = make_operation_coordinator()
     result.hass.async_add_executor_job.side_effect = [
         "SYNTHETIC_ID",
         ORDER_STATUS.ACCEPTED,
@@ -142,7 +120,7 @@ async def test_accepted_request_with_state_read_failure_is_labelled_accepted():
 async def test_request_timeout_is_unknown_not_a_reason_to_resend():
     from custom_components.hyundai_jp._api.exceptions import RequestTimeoutError
 
-    result = coordinator()
+    result = make_operation_coordinator()
     result.hass.async_add_executor_job.side_effect = RequestTimeoutError(
         "synthetic timeout"
     )

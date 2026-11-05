@@ -12,7 +12,7 @@ from custom_components.hyundai_jp._api import Token, Vehicle
 from custom_components.hyundai_jp._api.client import HyundaiBluelinkApi
 from custom_components.hyundai_jp._api.japan_mqtt import JapanMqttSession
 from custom_components.hyundai_jp.lock import HyundaiBluelinkLock
-from tests.ha.test_region_operation_serialization import coordinator
+from tests.ha.helpers import make_operation_coordinator
 
 
 async def test_delayed_unlock_survives_later_unrelated_packet_and_reaches_activity():
@@ -59,7 +59,7 @@ async def test_delayed_unlock_survives_later_unrelated_packet_and_reaches_activi
             ),
         )
 
-    result = coordinator()
+    result = make_operation_coordinator()
     result.vehicle_manager.api = api
     result.vehicle_manager.vehicles = {vehicle.id: vehicle}
     lock = HyundaiBluelinkLock.__new__(HyundaiBluelinkLock)

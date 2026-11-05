@@ -22,7 +22,7 @@ def discover_fixtures(prefix: str) -> list[str]:
 
     This enables parameterized tests: add a new JSON file with the right
     prefix and it will automatically be picked up by tests that use this
-    helper. For example, all files matching ``us_*_cached.json`` will be
-    found by ``discover_fixtures("us_")``.
+    helper. For example, all files matching ``ccs2_*.json`` will be
+    found by ``discover_fixtures("ccs2_")``.
     """
     return sorted(p.name for p in FIXTURES_DIR.glob(f"{prefix}*.json"))

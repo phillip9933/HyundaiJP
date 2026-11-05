@@ -14,11 +14,11 @@ from homeassistant.core import StateMachine
 from custom_components.hyundai_jp._api import Vehicle
 from custom_components.hyundai_jp._api.const import ORDER_STATUS
 from custom_components.hyundai_jp.lock import HyundaiBluelinkLock
-from tests.ha.test_region_operation_serialization import coordinator
+from tests.ha.helpers import make_operation_coordinator
 
 
 async def test_delayed_passive_state_reaches_lock_and_ha_activity_event():
-    result = coordinator()
+    result = make_operation_coordinator()
     vehicle = Vehicle(id="synthetic-car", is_locked=True)
     vehicle.last_updated_at = dt.datetime(2026, 11, 3, tzinfo=dt.UTC)
     result.vehicle_manager.vehicles = {vehicle.id: vehicle}
@@ -78,7 +78,7 @@ async def test_delayed_passive_state_reaches_lock_and_ha_activity_event():
 
 
 async def test_passive_watcher_observes_late_unlock_after_unrelated_update():
-    result = coordinator()
+    result = make_operation_coordinator()
     vehicle = Vehicle(id="synthetic-car", is_locked=True)
     baseline = dt.datetime(2026, 11, 3, tzinfo=dt.UTC)
     vehicle.last_updated_at = baseline

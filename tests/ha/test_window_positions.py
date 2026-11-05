@@ -6,7 +6,7 @@ from custom_components.hyundai_jp import binary_sensor, cover
 from custom_components.hyundai_jp._api import Vehicle
 from custom_components.hyundai_jp._api.const import WINDOW_STATE
 from custom_components.hyundai_jp.coordinator import JapanDataUpdateCoordinator
-from tests.ha.conftest import make_coordinator, make_hass
+from tests.ha.helpers import make_coordinator, make_hass, make_runtime_coordinator
 
 
 def vehicle(positions):
@@ -53,8 +53,7 @@ async def test_legacy_unspecified_positions_keeps_all_covers():
 
 
 async def test_vent_all_windows_targets_only_profile_supported_positions():
-    coordinator = JapanDataUpdateCoordinator.__new__(JapanDataUpdateCoordinator)
-    coordinator._initialize_runtime_state()
+    coordinator = make_runtime_coordinator()
     coordinator.vehicle_manager = MagicMock()
     coordinator.vehicle_manager.vehicles = {
         "synthetic": vehicle(("front_left", "front_right"))

@@ -11,7 +11,7 @@ import requests
 from custom_components.hyundai_jp._api import Token, Vehicle, VehicleManager
 from custom_components.hyundai_jp._api.client import HyundaiBluelinkApi
 from custom_components.hyundai_jp._api.const import ORDER_STATUS
-from tests.ha.test_region_operation_serialization import coordinator
+from tests.ha.helpers import make_operation_coordinator
 
 
 def pipeline(body=None, failure=None):
@@ -55,7 +55,7 @@ def pipeline(body=None, failure=None):
     vehicle = Vehicle(id="synthetic-car", ccu_ccs2_protocol_support=1, is_locked=True)
     manager.vehicles = {vehicle.id: vehicle}
     manager.update_all_vehicles_with_cached_state = Mock()
-    result = coordinator()
+    result = make_operation_coordinator()
     result.vehicle_manager = manager
     result._start_post_command_state_watch = Mock()
 

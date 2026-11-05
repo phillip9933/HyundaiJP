@@ -7,11 +7,11 @@ from unittest.mock import AsyncMock
 from homeassistant.exceptions import HomeAssistantError
 import pytest
 
-from tests.ha.test_region_operation_serialization import coordinator
+from tests.ha.helpers import make_operation_coordinator
 
 
-def render_coordinator():
-    result = coordinator()
+def render_make_operation_coordinator():
+    result = make_operation_coordinator()
 
     result._cache_svm_details(
         "synthetic",
@@ -23,7 +23,7 @@ def render_coordinator():
 
 
 async def test_concurrent_views_share_one_render():
-    result = render_coordinator()
+    result = render_make_operation_coordinator()
     entered = asyncio.Event()
     finish = asyncio.Event()
 
@@ -43,7 +43,7 @@ async def test_concurrent_views_share_one_render():
 
 
 async def test_recapture_during_render_returns_new_image():
-    result = render_coordinator()
+    result = render_make_operation_coordinator()
     entered = asyncio.Event()
     finish = asyncio.Event()
     count = 0
@@ -76,7 +76,7 @@ async def test_recapture_during_render_returns_new_image():
 
 
 async def test_empty_renderer_output_is_diagnosable():
-    result = render_coordinator()
+    result = render_make_operation_coordinator()
     result.hass.async_add_executor_job = AsyncMock(return_value={})
     with pytest.raises(HomeAssistantError, match="could not be decoded"):
         await result.async_get_svm_views("synthetic")
@@ -90,7 +90,7 @@ async def test_empty_renderer_output_is_diagnosable():
 
 
 async def test_renderer_exception_does_not_expose_private_data():
-    result = render_coordinator()
+    result = render_make_operation_coordinator()
     result.hass.async_add_executor_job = AsyncMock(
         side_effect=ValueError("SYNTHETIC_SECRET")
     )
@@ -101,7 +101,7 @@ async def test_renderer_exception_does_not_expose_private_data():
 
 
 async def test_cancelled_view_waits_for_renderer_before_next_view_starts():
-    result = render_coordinator()
+    result = render_make_operation_coordinator()
     entered = asyncio.Event()
     finish = asyncio.Event()
     calls = 0
@@ -129,7 +129,7 @@ async def test_cancelled_view_waits_for_renderer_before_next_view_starts():
 
 
 async def test_dewarp_change_during_render_discards_old_preference(monkeypatch):
-    result = render_coordinator()
+    result = render_make_operation_coordinator()
     entered, finish = asyncio.Event(), asyncio.Event()
     preferences = []
     notify = []
@@ -160,7 +160,7 @@ async def test_dewarp_change_during_render_discards_old_preference(monkeypatch):
 
 
 async def test_missing_capture_or_layout_does_not_submit_render_work():
-    result = coordinator()
+    result = make_operation_coordinator()
     assert await result.async_get_svm_views("synthetic") is None
     assert result.get_svm_render_diagnostics() == [
         {"state": "awaiting_capture", "view_count": 0}

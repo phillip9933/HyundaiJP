@@ -1,4 +1,4 @@
-"""Creation gating for the GSPA stored-status sensor extras (hyundai_jp #1913)."""
+"""Creation gating preserves unknown fields in optional stored-status sensors."""
 
 import pytest
 

@@ -7,11 +7,11 @@ from unittest.mock import AsyncMock, MagicMock
 from custom_components.hyundai_jp import coordinator as module
 from custom_components.hyundai_jp.image import SVMImageEntity
 from custom_components.hyundai_jp.sensor import SVMStatusSensor
-from tests.ha.test_region_operation_serialization import coordinator
+from tests.ha.helpers import make_operation_coordinator
 
 
 async def test_capture_without_gps_time_updates_status_and_render_cache(monkeypatch):
-    result = coordinator()
+    result = make_operation_coordinator()
 
     details = SimpleNamespace(
         captured_at=None, image_bytes=b"synthetic", image_sizes=(5, 1, 1, 1, 1, 1)
@@ -46,7 +46,7 @@ async def test_capture_without_gps_time_updates_status_and_render_cache(monkeypa
 
 
 def test_capture_timestamp_is_preserved_when_available():
-    result = coordinator()
+    result = make_operation_coordinator()
     captured = dt.datetime(2026, 10, 14, tzinfo=dt.UTC)
     result._cache_svm_details("synthetic", SimpleNamespace(captured_at=captured))
     assert result.get_svm_image_updated_at("synthetic") == captured

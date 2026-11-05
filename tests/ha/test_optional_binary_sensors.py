@@ -1,8 +1,4 @@
-"""Tests for the EU CCI stored-status binary sensors.
-
-Only the EU CCI library implementation fills these fields; vehicles from other
-regions leave them None and must not get the entities.
-"""
+"""Optional binary sensors appear only when Japan telemetry reports a value."""
 
 import pytest
 

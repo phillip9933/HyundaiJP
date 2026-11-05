@@ -8,7 +8,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 import pytest
 
-from custom_components.hyundai_jp.coordinator import JapanDataUpdateCoordinator
+from tests.ha.helpers import make_runtime_coordinator
 
 
 @pytest.mark.parametrize("operation", ["svm", "token"])
@@ -17,9 +17,7 @@ async def test_unlocked_japan_read_drains_before_shared_and_adapter_cleanup(
     monkeypatch, operation, cancel_caller
 ):
     monkeypatch.setattr(DataUpdateCoordinator, "async_shutdown", AsyncMock())
-    result = JapanDataUpdateCoordinator.__new__(JapanDataUpdateCoordinator)
-    result._initialize_runtime_state()
-    result._action_lock = asyncio.Lock()
+    result = make_runtime_coordinator()
 
     result._async_save_token = AsyncMock()
     result._sync_vehicle_enabled_states = Mock()

@@ -6,7 +6,7 @@ from homeassistant.helpers.entity import Entity
 
 from custom_components.hyundai_jp import climate
 from custom_components.hyundai_jp._api import Vehicle
-from tests.ha.conftest import make_coordinator, make_hass
+from tests.ha.helpers import make_coordinator, make_hass
 
 
 async def test_setup_does_not_refresh_the_coordinator_again() -> None:

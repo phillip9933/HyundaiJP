@@ -2,7 +2,6 @@
 
 from collections.abc import Awaitable, Callable
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -11,29 +10,7 @@ from custom_components.hyundai_jp import (
     sensor as sensor_platform,
 )
 from custom_components.hyundai_jp._api import Vehicle
-from custom_components.hyundai_jp.const import DOMAIN
-
-UNIQUE_ID = "uid"
-
-
-def make_coordinator(*vehicles: Vehicle) -> MagicMock:
-    """A coordinator stub holding ``vehicles``, keyed by ``vehicle.id``.
-
-    Coroutine methods that platform setup awaits are AsyncMocks; add new ones
-    here so every test picks them up.
-    """
-    coordinator = MagicMock()
-    coordinator.vehicle_manager.vehicles = {v.id: v for v in vehicles}
-    coordinator.async_supports_svm = AsyncMock(return_value=False)
-    return coordinator
-
-
-def make_hass(coordinator: MagicMock) -> tuple[MagicMock, MagicMock]:
-    """A ``(hass, config_entry)`` pair wired to ``coordinator``."""
-    hass = MagicMock()
-    hass.data = {DOMAIN: {UNIQUE_ID: coordinator}}
-    config_entry = MagicMock(unique_id=UNIQUE_ID)
-    return hass, config_entry
+from tests.ha.helpers import make_coordinator, make_hass
 
 
 @pytest.fixture

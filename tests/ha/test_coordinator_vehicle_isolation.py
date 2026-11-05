@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import datetime as dt
 import logging
 from types import SimpleNamespace
@@ -23,6 +22,7 @@ from custom_components.hyundai_jp._api.exceptions import (
 )
 from custom_components.hyundai_jp.coordinator import JapanDataUpdateCoordinator
 from custom_components.hyundai_jp.entity import HyundaiBluelinkEntity
+from tests.ha.helpers import make_runtime_coordinator
 
 
 class _StubDeviceRegistry:
@@ -66,9 +66,7 @@ def _make_coordinator(
     cached_failures: dict[str, Exception] | None = None,
 ) -> JapanDataUpdateCoordinator:
     """Build a coordinator with the attributes the polling code touches."""
-    coordinator = JapanDataUpdateCoordinator.__new__(JapanDataUpdateCoordinator)
-    coordinator._initialize_runtime_state()
-    coordinator._action_lock = asyncio.Lock()
+    coordinator = make_runtime_coordinator()
     coordinator.hass = _FakeHass()  # type: ignore[assignment]
     coordinator.config_entry = SimpleNamespace(entry_id="synthetic-entry")  # type: ignore[assignment]
     coordinator.force_refresh_interval = 1440

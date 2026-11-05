@@ -6,34 +6,26 @@ could be shown and driven as Fahrenheit.
 """
 
 from custom_components.hyundai_jp._api.const import TEMPERATURE_C
-from custom_components.hyundai_jp._api.telemetry import JapanTelemetry
 from custom_components.hyundai_jp._api.Vehicle import Vehicle
 from tests.api.fixture_helpers import load_fixture
 
 
-def _type1_api() -> JapanTelemetry:
-    api = JapanTelemetry()
-    api.data_timezone = None
-    api.temperature_range = [x * 0.5 for x in range(28, 60)]
-    return api
-
-
-def test_type1_keeps_unit_when_setpoint_off() -> None:
+def test_keeps_unit_when_setpoint_off(telemetry_parser) -> None:
     state = load_fixture("ccs2_ev3_2025_ccs2.json")
     assert state["Cabin"]["HVAC"]["Row1"]["Driver"]["Temperature"] == {
         "Value": "OFF",
         "Unit": 0,
     }
     vehicle = Vehicle(id="test-id")
-    _type1_api()._update_vehicle_properties_ccs2(vehicle, state)
+    telemetry_parser._update_vehicle_properties_ccs2(vehicle, state)
     assert vehicle._air_temperature_unit == TEMPERATURE_C
     assert vehicle.air_temperature is None
 
 
-def test_type1_off_keeps_last_setpoint() -> None:
+def test_off_keeps_last_setpoint(telemetry_parser) -> None:
     vehicle = Vehicle(id="test-id")
     vehicle.air_temperature = (22.0, TEMPERATURE_C)
-    _type1_api()._update_vehicle_properties_ccs2(
+    telemetry_parser._update_vehicle_properties_ccs2(
         vehicle, load_fixture("ccs2_ev3_2025_ccs2.json")
     )
     assert vehicle.air_temperature == 22.0

@@ -8,7 +8,7 @@ import pytest
 from custom_components.hyundai_jp import coordinator as coordinator_module
 from custom_components.hyundai_jp._api import Vehicle, VehicleManager
 from custom_components.hyundai_jp.const import DOMAIN
-from custom_components.hyundai_jp.coordinator import JapanDataUpdateCoordinator
+from tests.ha.helpers import make_runtime_coordinator
 
 
 def _sync(
@@ -30,9 +30,7 @@ def _sync(
     registry.async_get_device.side_effect = AssertionError("Unscoped device lookup")
     monkeypatch.setattr(coordinator_module.dr, "async_get", lambda _: registry)
 
-    coordinator = JapanDataUpdateCoordinator.__new__(JapanDataUpdateCoordinator)
-
-    coordinator._initialize_runtime_state()
+    coordinator = make_runtime_coordinator()
     coordinator.hass = MagicMock()
     coordinator.config_entry = SimpleNamespace(entry_id="synthetic-entry")
     coordinator.vehicle_manager = manager

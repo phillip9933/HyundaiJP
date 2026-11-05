@@ -1,47 +1,17 @@
 """Japan MQTT commands, token refresh, and status polling share one operation lock."""
 
 import asyncio
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 from homeassistant.exceptions import HomeAssistantError
 import pytest
 
 from custom_components.hyundai_jp._api.const import ORDER_STATUS
-from custom_components.hyundai_jp._api.VehicleManager import VehicleManager
-from custom_components.hyundai_jp.coordinator import JapanDataUpdateCoordinator
-
-
-def coordinator():
-    result = JapanDataUpdateCoordinator.__new__(JapanDataUpdateCoordinator)
-    result._initialize_runtime_state()
-    result.vehicle_manager = MagicMock()
-    result.vehicle_manager.api = SimpleNamespace(
-        requires_command_confirmation=True,
-        supports_remote_commands=True,
-        supports_force_refresh=True,
-        supported_commands=None,
-    )
-    result.vehicle_manager.supported_commands = None
-    result.vehicle_manager.apply_cached_mqtt_state.side_effect = lambda vehicle_id: (
-        VehicleManager.apply_cached_mqtt_state(result.vehicle_manager, vehicle_id)
-    )
-    result.vehicle_manager.get_vehicle.side_effect = lambda vehicle_id: (
-        result.vehicle_manager.vehicles[vehicle_id]
-    )
-    result._action_lock = asyncio.Lock()
-    result.data = {}
-    result.hass = MagicMock()
-    result.hass.async_add_executor_job = AsyncMock()
-    result.async_check_and_refresh_token = AsyncMock()
-    result.async_set_updated_data = MagicMock()
-    result.async_refresh = AsyncMock()
-
-    return result
+from tests.ha.helpers import make_operation_coordinator
 
 
 async def test_periodic_poll_skips_busy_japan_without_token_or_network_calls():
-    result = coordinator()
+    result = make_operation_coordinator()
     result._async_update_data_unlocked = AsyncMock()
     async with result._action_lock:
         assert await result._async_update_data() == {}
@@ -50,7 +20,7 @@ async def test_periodic_poll_skips_busy_japan_without_token_or_network_calls():
 
 
 async def test_periodic_poll_holds_lock_during_token_and_status_work():
-    result = coordinator()
+    result = make_operation_coordinator()
 
     async def work():
         assert result._action_lock.locked()
@@ -71,7 +41,7 @@ async def test_periodic_poll_holds_lock_during_token_and_status_work():
     ],
 )
 async def test_manual_operations_reject_busy_before_token_refresh(method, args):
-    result = coordinator()
+    result = make_operation_coordinator()
     async with result._action_lock:
         with pytest.raises(HomeAssistantError, match="operation is in progress"):
             await getattr(result, method)(*args)
@@ -80,7 +50,7 @@ async def test_manual_operations_reject_busy_before_token_refresh(method, args):
 
 
 async def test_svm_capture_refreshes_token_while_holding_lock():
-    result = coordinator()
+    result = make_operation_coordinator()
 
     async def refresh_token():
         assert result._action_lock.locked()
@@ -96,7 +66,7 @@ async def test_command_poll_and_manual_force_cannot_replace_active_session(monke
     monkeypatch.setattr(
         "custom_components.hyundai_jp.coordinator.asyncio.sleep", AsyncMock()
     )
-    result = coordinator()
+    result = make_operation_coordinator()
     started, release = asyncio.Event(), asyncio.Event()
 
     async def job(fn, *args):
@@ -126,7 +96,7 @@ async def test_confirmed_command_telemetry_failure_is_reported_accurately(monkey
     monkeypatch.setattr(
         "custom_components.hyundai_jp.coordinator.asyncio.sleep", AsyncMock()
     )
-    result = coordinator()
+    result = make_operation_coordinator()
     result.hass.async_add_executor_job.side_effect = [
         "synthetic-action",
         ORDER_STATUS.SUCCESS,
@@ -146,7 +116,7 @@ async def test_unconfirmed_result_remains_unconfirmed_if_refresh_also_fails(
     monkeypatch.setattr(
         "custom_components.hyundai_jp.coordinator.asyncio.sleep", AsyncMock()
     )
-    result = coordinator()
+    result = make_operation_coordinator()
     result.hass.async_add_executor_job.side_effect = [
         "synthetic-action",
         ORDER_STATUS.FAILED,

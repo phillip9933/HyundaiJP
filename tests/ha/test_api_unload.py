@@ -9,7 +9,7 @@ import pytest
 
 from custom_components.hyundai_jp import async_unload_entry
 from custom_components.hyundai_jp.const import DOMAIN
-from tests.ha.test_region_operation_serialization import coordinator
+from tests.ha.helpers import make_operation_coordinator
 
 
 async def test_failed_platform_unload_keeps_api_session_open():
@@ -80,7 +80,7 @@ async def test_failed_platform_unload_does_not_start_shutdown():
 
 
 async def test_unload_drains_existing_command_and_blocks_new_commands(monkeypatch):
-    result = coordinator()
+    result = make_operation_coordinator()
     result._closing = False
     result._async_unsub_refresh = Mock()
     result._async_unsub_shutdown = Mock()
