@@ -21,6 +21,7 @@ JPEG stays the only lossy generation.
 
 from __future__ import annotations
 
+from contextlib import ExitStack, closing
 from dataclasses import dataclass
 import io
 import math
@@ -184,9 +185,9 @@ def dewarp_fisheye(
 
 def to_jpeg_bytes(img: Image.Image) -> bytes:
     """Encode a PIL image as JPEG bytes (quality 100, 4:4:4)."""
-    buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=100, subsampling=0)
-    return buf.getvalue()
+    with io.BytesIO() as buf:
+        img.save(buf, format="JPEG", quality=100, subsampling=0)
+        return buf.getvalue()
 
 
 def crop_view(details: SVMDetails, view: str) -> Image.Image | None:
@@ -203,6 +204,22 @@ def crop_view(details: SVMDetails, view: str) -> Image.Image | None:
         raise ImportError(
             f"SVM image support requires Pillow ({IMAGE_EXTRA_HINT})"
         ) from err
+    if not details.image_bytes:
+        return None
+    try:
+        with (
+            io.BytesIO(details.image_bytes) as source,
+            closing(Image.open(source)) as img,
+        ):
+            return _crop_decoded_view(details, view, img)
+    except Exception:
+        return None
+
+
+def _crop_decoded_view(
+    details: SVMDetails, view: str, img: Image.Image
+) -> Image.Image | None:
+    """Crop an independent RGB image while its shared composite remains open."""
     match = next((v for v in VIEWS if v.key == view), None)
     if match is None:
         return None
@@ -219,13 +236,15 @@ def crop_view(details: SVMDetails, view: str) -> Image.Image | None:
         if len(sizes) > other.width_index:
             x += sizes[other.width_index]
     try:
-        img = Image.open(io.BytesIO(details.image_bytes))
         if x + width > img.width or height > img.height:
             return None
         cropped = img.crop((x, 0, x + width, height))
     except Exception:
         return None
-    return cropped if cropped.mode == "RGB" else cropped.convert("RGB")
+    if cropped.mode == "RGB":
+        return cropped
+    with closing(cropped):
+        return cropped.convert("RGB")
 
 
 def render_views(details: SVMDetails, *, dewarp: bool = False) -> dict[str, bytes]:
@@ -246,22 +265,37 @@ def render_views(details: SVMDetails, *, dewarp: bool = False) -> dict[str, byte
             raise ImportError(
                 f"SVM dewarp requires numpy ({IMAGE_EXTRA_HINT})"
             ) from err
-    views: dict[str, bytes] = {}
-    for order, view in enumerate(VIEWS):
-        img = crop_view(details, view.key)
-        if img is None:
-            continue
-        if dewarp and order < 4:
-            fov = camera_fov_deg(details.valid_angle_of_view, order)
-            if fov is not None:
-                # Zoom in slightly so the output rectangle stays inside the
-                # fisheye circle and the worst corner stretch is cropped
-                # away. Factor tuned against a daylight capture: FRONT 76 ->
-                # ~59, REAR 78 -> ~61, LEFT 87 -> ~68, RIGHT 81 -> ~63. Clamp
-                # keeps the value sane if calibration reports an odd FOV.
-                output_fov = max(50.0, min(fov * 0.78, 85.0))
-                dewarped = dewarp_fisheye(img, fov, output_fov_deg=output_fov)
-                if dewarped is not None:
-                    img = dewarped
-        views[view.key] = to_jpeg_bytes(img)
-    return views
+    try:
+        from PIL import Image
+    except ImportError as err:
+        raise ImportError(
+            f"SVM image support requires Pillow ({IMAGE_EXTRA_HINT})"
+        ) from err
+    if not details.image_bytes:
+        return {}
+    with ExitStack() as images:
+        try:
+            source = images.enter_context(io.BytesIO(details.image_bytes))
+            composite = images.enter_context(closing(Image.open(source)))
+            composite.load()
+        except Exception:
+            return {}
+        views: dict[str, bytes] = {}
+        for order, view in enumerate(VIEWS):
+            img = _crop_decoded_view(details, view.key, composite)
+            if img is None:
+                continue
+            with closing(img):
+                dewarped = None
+                if dewarp and order < 4:
+                    fov = camera_fov_deg(details.valid_angle_of_view, order)
+                    if fov is not None:
+                        # Keep the existing zoom and corner-stretch limits.
+                        output_fov = max(50.0, min(fov * 0.78, 85.0))
+                        dewarped = dewarp_fisheye(img, fov, output_fov_deg=output_fov)
+                if dewarped is None:
+                    views[view.key] = to_jpeg_bytes(img)
+                else:
+                    with closing(dewarped):
+                        views[view.key] = to_jpeg_bytes(dewarped)
+        return views

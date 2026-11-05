@@ -3,6 +3,7 @@
 import datetime as dt
 import io
 import sys
+from unittest.mock import Mock
 
 import pytest
 
@@ -10,6 +11,7 @@ from custom_components.hyundai_jp._api.svm import SVMDetails
 from custom_components.hyundai_jp._api.svm_image import (
     camera_fov_deg,
     crop_view,
+    dewarp_fisheye,
     render_views,
     to_jpeg_bytes,
 )
@@ -204,3 +206,96 @@ def test_render_views_sizes_larger_than_image_omit_views():
     img.save(buf, format="JPEG", quality=100, subsampling=0)
     views = render_views(_make_details(image_bytes=buf.getvalue()))
     assert views == {}
+
+
+def test_render_decodes_the_composite_only_once(monkeypatch):
+    from PIL import Image
+
+    details = _make_details()
+    decoder = Mock(wraps=Image._getdecoder)
+    opened = Mock(wraps=Image.open)
+    monkeypatch.setattr(Image, "_getdecoder", decoder)
+    monkeypatch.setattr(Image, "open", opened)
+
+    views = render_views(details)
+
+    assert set(views) == set(VIEW_KEYS)
+    opened.assert_called_once()
+    assert [call.args[1] for call in decoder.call_args_list] == ["jpeg"]
+
+
+@pytest.mark.parametrize("dewarp", [False, True])
+@pytest.mark.parametrize("mode", ["RGB", "L"])
+def test_single_decode_matches_legacy_crops_and_jpeg_bytes(dewarp, mode):
+    from PIL import Image
+
+    # A gradient catches both wrong offsets and altered resampling/encoding.
+    with (
+        Image.linear_gradient("L").resize((48, 12)) as gradient,
+        gradient.convert(mode) as composite,
+    ):
+        data = to_jpeg_bytes(composite)
+    details = _make_details(
+        image_bytes=data,
+        image_sizes=(48, 12, 10, 12, 8, 12),
+        valid_angle_of_view=_calibration(),
+    )
+    expected = {}
+    for order, key in enumerate(VIEW_KEYS):
+        width = 8 if key == "top" else 10
+        # This is the old public crop+encode flow, using independent explicit
+        # boxes rather than the new decoded-composite helper.
+        with (
+            Image.open(io.BytesIO(data)) as source,
+            source.crop((order * 10, 0, order * 10 + width, 12)) as crop,
+            crop.convert("RGB") as image,
+        ):
+            fov = camera_fov_deg(details.valid_angle_of_view, order)
+            if dewarp and order < 4 and fov is not None:
+                result = dewarp_fisheye(
+                    image, fov, output_fov_deg=max(50, min(fov * 0.78, 85))
+                )
+                assert result is not None
+                with result:
+                    expected[key] = to_jpeg_bytes(result)
+            else:
+                expected[key] = to_jpeg_bytes(image)
+
+    assert render_views(details, dewarp=dewarp) == expected
+    with crop_view(details, "top") as public_crop:
+        assert public_crop.size == (8, 12)
+        assert to_jpeg_bytes(public_crop) == expected["top"]
+
+
+@pytest.mark.parametrize("failure", ["malformed", "encoding", "cancelled"])
+def test_render_closes_composite_and_stream_on_failure(monkeypatch, failure):
+    import asyncio
+
+    from PIL import Image
+
+    from custom_components.hyundai_jp._api import svm_image
+
+    details = _make_details(
+        image_bytes=b"not a JPEG" if failure == "malformed" else None
+    )
+    original_open = Image.open
+    streams, composites = [], []
+
+    def opened(source):
+        streams.append(source)
+        image = original_open(source)
+        composites.append(image)
+        return image
+
+    monkeypatch.setattr(Image, "open", opened)
+    if failure == "malformed":
+        assert render_views(details) == {}
+    else:
+        error = asyncio.CancelledError() if failure == "cancelled" else RuntimeError()
+        monkeypatch.setattr(svm_image, "to_jpeg_bytes", Mock(side_effect=error))
+        with pytest.raises(type(error)):
+            render_views(details)
+    assert all(stream.closed for stream in streams)
+    for image in composites:
+        with pytest.raises(ValueError, match="closed image"):
+            image.getpixel((0, 0))
