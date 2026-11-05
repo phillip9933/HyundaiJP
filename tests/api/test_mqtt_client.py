@@ -235,6 +235,30 @@ def test_disconnect_callback_routes_reason():
     assert t.is_connected is False
 
 
+def test_expected_disconnect_is_quiet_but_unexpected_disconnect_still_warns(caplog):
+    import logging
+    from unittest.mock import Mock
+
+    transport = MqttTransport()
+    transport._client = Mock()
+    transport._client.disconnect.side_effect = lambda: transport._on_mqtt_disconnect(
+        None, None, None, 0
+    )
+    with caplog.at_level(logging.DEBUG):
+        transport.disconnect()
+    assert "clean disconnect" in caplog.text
+    assert not any(record.levelno >= logging.WARNING for record in caplog.records)
+
+    caplog.clear()
+    transport._disconnect_requested = False
+    transport._on_mqtt_disconnect(None, None, None, 0)
+    assert any(record.levelno == logging.WARNING for record in caplog.records)
+    caplog.clear()
+    transport._disconnect_requested = True
+    transport._on_mqtt_disconnect(None, None, None, 7)
+    assert any(record.levelno == logging.WARNING for record in caplog.records)
+
+
 def test_subscribe_ack_logs_rejections_and_grants():
     import custom_components.hyundai_jp._api.mqtt_client as mod
 

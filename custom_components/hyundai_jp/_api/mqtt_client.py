@@ -51,6 +51,7 @@ class MqttTransport:
         self._broker_username: str | None = None
         self._broker_password: str | None = None
         self._connected: bool = False
+        self._disconnect_requested = False
 
     @property
     def is_connected(self) -> bool:
@@ -85,6 +86,7 @@ class MqttTransport:
         if not self._broker_host:
             raise ValueError("Broker host not configured. Call configure() first.")
 
+        self._disconnect_requested = False
         self._client = mqtt.Client(
             callback_api_version=CallbackAPIVersion.VERSION2,
             client_id=self._client_id,
@@ -126,6 +128,7 @@ class MqttTransport:
 
     def disconnect(self) -> None:
         """Disconnect before stopping the loop, then release all local state."""
+        self._disconnect_requested = True
         if self._client:
             try:
                 self._client.disconnect()
@@ -226,7 +229,10 @@ class MqttTransport:
             self._pending_subscriptions.clear()
         rc = reason_code.value if not isinstance(reason_code, int) else reason_code
         reason = "clean disconnect" if rc == 0 else f"unexpected (rc={rc})"
-        _LOGGER.warning(f"{DOMAIN} - Push DISCONNECTED: {reason}")
+        if self._disconnect_requested and rc == 0:
+            _LOGGER.debug("%s - Push DISCONNECTED: %s", DOMAIN, reason)
+        else:
+            _LOGGER.warning("%s - Push DISCONNECTED: %s", DOMAIN, reason)
         if self._on_disconnect:
             self._on_disconnect(reason)
 
