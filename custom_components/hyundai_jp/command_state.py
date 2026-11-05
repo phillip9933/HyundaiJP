@@ -77,7 +77,7 @@ class PendingCommandTracker:
         pending = _PendingCommand(
             target=target,
             baseline=self._timestamp(vehicle.last_updated_at),
-            started_at=dt.datetime.now(dt.UTC).replace(microsecond=0),
+            started_at=dt.datetime.now(dt.UTC),
             deadline=time.monotonic() + self.SUBMISSION_TIMEOUT_SECONDS,
         )
         self._pending[key] = pending

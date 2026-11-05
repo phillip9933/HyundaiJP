@@ -11,6 +11,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 import pytest
 
+from custom_components.hyundai_jp import command_state
 from custom_components.hyundai_jp._api import Vehicle, VehicleManager
 from custom_components.hyundai_jp._api.const import ORDER_STATUS
 from custom_components.hyundai_jp._api.exceptions import RequestTimeoutError
@@ -220,6 +221,34 @@ async def test_pending_diagnostics_do_not_export_identifiers(controls):
     assert diagnostic[0]["actuator"] == "door_lock"
     assert vehicle.id not in repr(diagnostic)
     assert "SYNTHETIC_PRIVATE_ACTION" not in repr(diagnostic)
+
+
+async def test_unknown_baseline_rejects_older_sample_within_request_second(monkeypatch):
+    class FixedDateTime(dt.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 1, 1, 0, 0, 0, 500000, tzinfo=dt.UTC)
+
+    monkeypatch.setattr(
+        command_state, "dt", SimpleNamespace(datetime=FixedDateTime, UTC=dt.UTC)
+    )
+    vehicle = Vehicle(id="synthetic", is_locked=True)
+    tracker = command_state.PendingCommandTracker(Mock())
+    try:
+        tracker.begin(vehicle, "door_lock", True)
+        vehicle.last_updated_at = FixedDateTime(
+            2026, 1, 1, 0, 0, 0, 100000, tzinfo=dt.UTC
+        )
+        tracker.observe({vehicle.id: vehicle})
+        assert tracker.target(vehicle.id, "door_lock") is True
+        vehicle.last_updated_at = FixedDateTime(
+            2026, 1, 1, 0, 0, 0, 700000, tzinfo=dt.UTC
+        )
+        tracker.observe({vehicle.id: vehicle})
+        assert tracker.target(vehicle.id, "door_lock") is None
+        assert tracker.phase(vehicle.id, "door_lock") == "confirmed"
+    finally:
+        tracker.close()
 
 
 async def test_charge_port_exists_even_when_windows_are_unsupported():
