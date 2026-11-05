@@ -80,13 +80,10 @@ already moved. Locks similarly show Locking/Unlocking while confirmation is
 pending. Old cached values do not clear this progress, and pending requests
 expire rather than remaining stuck indefinitely.
 
-The **Charge Port (legacy)** switch keeps its existing ID for automations. On an
-existing dashboard, select the Charge Port button for the single action and the
-Charge Port Status cover for status. There is no need to remove the account or
-recreate automations. The old switch still follows telemetry, so it can appear in
-Activity even when a different control sent the request. If no dashboard or
-automation uses it, you can disable that legacy entity in its settings. Hiding
-it alone does not stop its state changes from appearing in Activity.
+On an existing dashboard, select the Charge Port button for the single action
+and the Charge Port Status cover for status. The duplicate charge-port switch
+from earlier releases is removed automatically on startup. Its older Activity
+entries remain in HA history; no new switch events are generated.
 
 Climate requests use current heater/defrost settings and the target selected in
 the climate card. Home Assistant converts your chosen display units to the
