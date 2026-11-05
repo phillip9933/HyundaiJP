@@ -14,6 +14,7 @@ from custom_components.hyundai_jp._api import (
     VehicleManager,
 )
 from custom_components.hyundai_jp._api.exceptions import APIError
+from custom_components.hyundai_jp.climate import _submission_is_uncertain
 from custom_components.hyundai_jp.coordinator import _ConfirmedCommandRefreshError
 from tests.ha.helpers import make_runtime_coordinator
 
@@ -206,11 +207,12 @@ async def test_accepted_stop_with_failed_telemetry_reports_unsent_restart():
         "accepted but stale"
     )
     try:
-        with pytest.raises(HomeAssistantError, match="Restart was not sent"):
+        with pytest.raises(HomeAssistantError, match="Restart was not sent") as caught:
             await owner.async_change_climate_temperature(
                 "synthetic", ClimateRequestOptions(set_temp=23)
             )
         assert events == [{"command": "stop"}]
+        assert not _submission_is_uncertain(caught.value)
         owner._async_wait_for_climate_restart.assert_not_awaited()
         assert not owner._action_lock.locked()
     finally:

@@ -22,10 +22,35 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util.unit_conversion import TemperatureConverter
 
 from ._api import ClimateRequestOptions, Vehicle
+from ._api.exceptions import UnsupportedControlError
 from ._api.utils import flag_or_none
 from .const import DOMAIN
 from .coordinator import JapanDataUpdateCoordinator
 from .entity import HyundaiBluelinkEntity
+
+
+def _submission_is_uncertain(error: BaseException) -> bool:
+    """Use submission metadata, preserving the outer operation's scope."""
+    current: BaseException | None = error
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if (
+            getattr(current, "request_rejected", False) is True
+            or getattr(current, "action_submitted", None) is False
+        ):
+            return False
+        if getattr(current, "action_submitted", None) is True:
+            return True
+        if isinstance(current, (ValueError, UnsupportedControlError)):
+            return False
+        cause = current.__cause__
+        if cause is None:
+            # Coordinator admission/preflight errors have no submitted cause.
+            # Other unclassified transport/implementation failures are uncertain.
+            return not isinstance(current, HomeAssistantError)
+        current = cause
+    return True
 
 
 async def async_setup_entry(
@@ -78,8 +103,9 @@ class HyundaiBluelinkCarClimateControlSwitch(HyundaiBluelinkEntity, ClimateEntit
         self._requested_temperature: float | None = None
         self._temperature_confirmation_deadline: float | None = None
         self._temperature_expiry_handle: asyncio.TimerHandle | None = None
+        self._climate_removed = False
         self._last_known_temperature = self._vehicle_temperature()
-        self.async_on_remove(self._cancel_temperature_expiry)
+        self.async_on_remove(self._remove_temperature_state)
 
     def _vehicle_temperature(self) -> float | None:
         """Normalize known telemetry to the Celsius accepted by Japan commands."""
@@ -118,18 +144,26 @@ class HyundaiBluelinkCarClimateControlSwitch(HyundaiBluelinkEntity, ClimateEntit
     def _schedule_temperature_expiry(self) -> None:
         self._cancel_temperature_expiry()
         deadline = self._temperature_confirmation_deadline
-        if deadline is not None:
+        if deadline is not None and not self._climate_removed:
             self._temperature_expiry_handle = asyncio.get_running_loop().call_later(
                 max(0, deadline - time.monotonic()), self._expire_temperature_choice
             )
 
     def _expire_temperature_choice(self) -> None:
         """Publish expiry even when no new car telemetry arrives."""
-        self._temperature_expiry_handle = None
+        self._cancel_temperature_expiry()
         self._requested_temperature = None
         self._temperature_confirmation_deadline = None
         self._sync_temperature_choice()
-        self.async_write_ha_state()
+        self._publish_temperature_state()
+
+    def _remove_temperature_state(self) -> None:
+        self._climate_removed = True
+        self._cancel_temperature_expiry()
+
+    def _publish_temperature_state(self) -> None:
+        if not self._climate_removed:
+            self.async_write_ha_state()
 
     @property
     def native_temperature_unit(self) -> str:
@@ -181,7 +215,11 @@ class HyundaiBluelinkCarClimateControlSwitch(HyundaiBluelinkEntity, ClimateEntit
 
     def _build_climate_request(self) -> ClimateRequestOptions:
         """Use current heater/defrost state, never a startup snapshot."""
-        selected = self.native_target_temperature
+        self._sync_temperature_choice()
+        selected = self._requested_temperature
+        if selected is None:
+            # A remembered display value is not a current command choice.
+            selected = self._vehicle_temperature()
         temperature = self._validated_temperature(selected)
         if selected != temperature:
             raise HomeAssistantError(
@@ -202,7 +240,7 @@ class HyundaiBluelinkCarClimateControlSwitch(HyundaiBluelinkEntity, ClimateEntit
         )
 
     def _mark_temperature_submitted(self) -> None:
-        if self._requested_temperature is not None:
+        if self._requested_temperature is not None and not self._climate_removed:
             self._temperature_confirmation_deadline = (
                 time.monotonic() + self._TEMPERATURE_CONFIRMATION_SECONDS
             )
@@ -273,6 +311,12 @@ class HyundaiBluelinkCarClimateControlSwitch(HyundaiBluelinkEntity, ClimateEntit
                 await self.coordinator.async_start_climate(self.vehicle.id, options)
             except asyncio.CancelledError:
                 self._mark_temperature_submitted()
+                self._publish_temperature_state()
+                raise
+            except Exception as err:
+                if _submission_is_uncertain(err):
+                    self._mark_temperature_submitted()
+                    self._publish_temperature_state()
                 raise
             self._mark_temperature_submitted()
         else:
@@ -282,7 +326,7 @@ class HyundaiBluelinkCarClimateControlSwitch(HyundaiBluelinkEntity, ClimateEntit
         self._require_idle_request()
         async with self._request_lock:
             await self._async_set_hvac_mode(hvac_mode)
-        self.async_write_ha_state()
+        self._publish_temperature_state()
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Keep a draft while off; serialize a complete stop/wait/start while on."""
@@ -319,14 +363,20 @@ class HyundaiBluelinkCarClimateControlSwitch(HyundaiBluelinkEntity, ClimateEntit
                 # Coordinator cancellation waits for its owned operation. Keep
                 # any submitted target bounded until matching telemetry arrives.
                 self._mark_temperature_submitted()
+                self._publish_temperature_state()
                 raise
-            except Exception:
-                self._requested_temperature, self._temperature_confirmation_deadline = (
-                    previous
-                )
-                self._schedule_temperature_expiry()
+            except Exception as err:
+                if _submission_is_uncertain(err):
+                    self._mark_temperature_submitted()
+                else:
+                    (
+                        self._requested_temperature,
+                        self._temperature_confirmation_deadline,
+                    ) = previous
+                    self._schedule_temperature_expiry()
+                self._publish_temperature_state()
                 raise
-        self.async_write_ha_state()
+        self._publish_temperature_state()
 
     # Home Assistant before 2026.11 reads the legacy property names.
     if not hasattr(ClimateEntity, "native_temperature_unit"):

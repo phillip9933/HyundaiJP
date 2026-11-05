@@ -77,6 +77,12 @@ class _ConfirmedCommandRefreshError(HomeAssistantError):
     action_submitted = True
     request_rejected = False
 
+class _ClimateRestartNotSubmittedError(HomeAssistantError):
+    """The stop stage may have run, but the requested target was never sent."""
+
+    action_submitted = False
+    request_rejected = True
+
 
 class _UnconfirmedCommandError(HomeAssistantError):
     """A submitted command has a known, unsuccessful confirmation outcome."""
@@ -1138,9 +1144,14 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 False,
             )
         except _ConfirmedCommandRefreshError as err:
-            raise HomeAssistantError(
+            raise _ClimateRestartNotSubmittedError(
                 "The climate stop request was accepted, but its updated state "
                 "could not be retrieved. Restart was not sent; check vehicle status."
+            ) from err
+        except HomeAssistantError as err:
+            raise _ClimateRestartNotSubmittedError(
+                "The climate stop outcome was not confirmed. Restart was not sent; "
+                "check vehicle status before retrying."
             ) from err
         try:
             await self._async_wait_for_climate_restart()

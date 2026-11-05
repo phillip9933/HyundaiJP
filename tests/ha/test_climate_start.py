@@ -206,6 +206,21 @@ async def test_unknown_temperature_requires_explicit_choice_before_start():
     entity.coordinator.async_stop_climate.assert_not_called()
 
 
+async def test_missing_telemetry_does_not_reapply_last_known_display_target():
+    entity = _entity(air_control_is_on=False)
+    entity.vehicle.air_temperature = (None, "C")
+    assert entity.native_target_temperature == 21
+
+    with pytest.raises(HomeAssistantError, match="Choose a target temperature"):
+        await entity.async_turn_on()
+
+    entity.coordinator.async_start_climate.assert_not_called()
+    await entity.async_set_temperature(temperature=23)
+    await entity.async_turn_on()
+    options = entity.coordinator.async_start_climate.call_args.args[1]
+    assert options.set_temp == 23
+
+
 async def test_unsupported_telemetry_setpoint_is_not_silently_changed_on_start():
     entity = _entity(air_control_is_on=False)
     entity.vehicle.air_temperature = (21.25, "C")
@@ -331,3 +346,82 @@ async def test_real_ha_temperature_service_converts_user_input_to_celsius(
     assert options.set_temp == entity.native_target_temperature == expected
     assert options.temp_unit == 0
     assert entity.state_attributes["temperature"] == requested
+
+
+def _uncertain_error(kind):
+    if kind == "timeout":
+        cause = TimeoutError("completion timed out")
+    elif kind == "accepted_refresh":
+        cause = RuntimeError("accepted but telemetry refresh failed")
+    else:
+        cause = ConnectionError("transport closed after submission")
+    cause.action_submitted = True
+    cause.request_rejected = False
+    error = HomeAssistantError("Command outcome is not confirmed")
+    error.__cause__ = cause
+    return error
+
+
+@pytest.mark.parametrize("kind", ["timeout", "accepted_refresh", "unknown_transport"])
+@pytest.mark.parametrize("restart", [False, True])
+async def test_uncertain_start_keeps_attempted_target_bounded(kind, restart):
+    entity = _entity(air_control_is_on=restart)
+    error = _uncertain_error(kind)
+    if restart:
+        entity.coordinator.async_change_climate_temperature.side_effect = error
+        operation = entity.async_set_temperature(temperature=23)
+    else:
+        await entity.async_set_temperature(temperature=23)
+        entity.coordinator.async_start_climate.side_effect = error
+        operation = entity.async_turn_on()
+
+    with pytest.raises(HomeAssistantError, match="not confirmed"):
+        await operation
+
+    assert entity.native_target_temperature == 23
+    assert entity._temperature_confirmation_deadline is not None
+    assert entity._temperature_expiry_handle is not None
+    entity._expire_temperature_choice()
+    assert entity.native_target_temperature == 21
+
+
+@pytest.mark.parametrize("kind", ["rejected", "preflight"])
+async def test_definite_failure_preserves_original_confirmation_deadline(kind):
+    entity = _entity(air_control_is_on=True)
+    await entity.async_set_temperature(temperature=22)
+    original_deadline = entity._temperature_confirmation_deadline
+    if kind == "rejected":
+        cause = RuntimeError("service rejected request")
+        cause.action_submitted = True
+        cause.request_rejected = True
+    else:
+        cause = ValueError("unsupported profile")
+    error = HomeAssistantError("Request failed")
+    error.__cause__ = cause
+    entity.coordinator.async_change_climate_temperature.side_effect = error
+
+    with pytest.raises(HomeAssistantError, match="Request failed"):
+        await entity.async_set_temperature(temperature=24)
+
+    assert entity.native_target_temperature == 22
+    assert entity._temperature_confirmation_deadline == original_deadline
+    assert entity._temperature_expiry_handle is not None
+    entity._remove_temperature_state()
+
+
+async def test_removed_entity_does_not_recreate_expiry_after_late_failure():
+    entity = _entity(air_control_is_on=False)
+    await entity.async_set_temperature(temperature=23)
+
+    async def submitted_then_removed(*args):
+        entity._remove_temperature_state()
+        raise _uncertain_error("accepted_refresh")
+
+    entity.coordinator.async_start_climate.side_effect = submitted_then_removed
+    entity.async_write_ha_state.reset_mock()
+    with pytest.raises(HomeAssistantError):
+        await entity.async_turn_on()
+
+    assert entity._temperature_expiry_handle is None
+    assert entity._temperature_confirmation_deadline is None
+    entity.async_write_ha_state.assert_not_called()
