@@ -181,7 +181,12 @@ class HyundaiBluelinkCarClimateControlSwitch(HyundaiBluelinkEntity, ClimateEntit
 
     def _build_climate_request(self) -> ClimateRequestOptions:
         """Use current heater/defrost state, never a startup snapshot."""
-        temperature = self._validated_temperature(self.native_target_temperature)
+        selected = self.native_target_temperature
+        temperature = self._validated_temperature(selected)
+        if selected != temperature:
+            raise HomeAssistantError(
+                "Choose a target temperature in the supported half-degree steps"
+            )
         wheel = flag_or_none(self.vehicle.steering_wheel_heater_is_on)
         rear = flag_or_none(self.vehicle.back_window_heater_is_on)
         heating = None
@@ -296,17 +301,20 @@ class HyundaiBluelinkCarClimateControlSwitch(HyundaiBluelinkEntity, ClimateEntit
             elif kwargs.get(ATTR_HVAC_MODE) is None:
                 raise HomeAssistantError("Provide a target temperature")
             try:
-                if (hvac_mode := kwargs.get(ATTR_HVAC_MODE)) is not None:
-                    await self._async_set_hvac_mode(hvac_mode)
-                elif (
+                hvac_mode = kwargs.get(ATTR_HVAC_MODE)
+                if (
                     self.vehicle.air_control_is_on is True
+                    and value is not None
                     and old_temperature != self._requested_temperature
+                    and hvac_mode in (None, HVACMode.AUTO, HVACMode.HEAT, HVACMode.COOL)
                 ):
                     options = self._build_climate_request()
                     await self.coordinator.async_change_climate_temperature(
                         self.vehicle.id, options
                     )
                     self._mark_temperature_submitted()
+                elif hvac_mode is not None:
+                    await self._async_set_hvac_mode(hvac_mode)
             except asyncio.CancelledError:
                 # Coordinator cancellation waits for its owned operation. Keep
                 # any submitted target bounded until matching telemetry arrives.

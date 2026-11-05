@@ -139,6 +139,15 @@ async def test_set_temperature_with_hvac_mode_starts_climate() -> None:
     assert options.set_temp == 22.5
 
 
+async def test_temperature_with_mode_while_running_uses_atomic_restart():
+    entity = _entity(air_control_is_on=True)
+    await entity.async_set_temperature(temperature=22.5, hvac_mode=HVACMode.AUTO)
+    options = entity.coordinator.async_change_climate_temperature.call_args.args[1]
+    assert options.set_temp == 22.5
+    entity.coordinator.async_start_climate.assert_not_called()
+    entity.coordinator.async_stop_climate.assert_not_called()
+
+
 async def test_coordinator_update_preserves_draft_then_settles_confirmed_target() -> (
     None
 ):
@@ -195,6 +204,15 @@ async def test_unknown_temperature_requires_explicit_choice_before_start():
         await entity.async_turn_on()
     entity.coordinator.async_start_climate.assert_not_called()
     entity.coordinator.async_stop_climate.assert_not_called()
+
+
+async def test_unsupported_telemetry_setpoint_is_not_silently_changed_on_start():
+    entity = _entity(air_control_is_on=False)
+    entity.vehicle.air_temperature = (21.25, "C")
+    with pytest.raises(HomeAssistantError, match="half-degree"):
+        await entity.async_turn_on()
+    assert entity.native_target_temperature == 21.25
+    entity.coordinator.async_start_climate.assert_not_called()
 
 
 async def test_unknown_heater_states_are_not_changed_by_start():
