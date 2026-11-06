@@ -1,32 +1,32 @@
 {
-  "selection": "solid squarer flap with larger thumb notch",
   "icons": [
     {
       "name": "car-charge-port",
       "viewBox": "0 0 24 24",
       "path_count": 1,
+      "raster_identical_to_approved": true,
       "bounds_at_240px": [
-        20,
-        40,
-        220,
-        200
+        48,
+        62,
+        192,
+        178
       ],
-      "svg_sha256": "1b861d0ff960130de33034d42a77616c5274553cbee9360a12e3b54e2913f931",
-      "thumb_notch_24px_checked": true
+      "svg_sha256": "869b44ead3966c41d9fa0b5863df42a098476c5f4aa74c8015df52758861e566"
     },
     {
       "name": "car-charge-port-open",
       "viewBox": "0 0 24 24",
       "path_count": 1,
+      "raster_identical_to_approved": true,
       "bounds_at_240px": [
         20,
-        40,
+        77,
         220,
-        200
+        166
       ],
-      "svg_sha256": "1fd2bdc9c63a37bf2a359a7c4bd8ab1ac9a16a1118a1e9618663e76efb312ebf",
-      "thumb_notch_24px_checked": true
+      "svg_sha256": "6ef0f6ddb33393544bee60b409775f525921c39f4c8b4cc421780c6ad6b83296"
     }
   ],
-  "runtime_modified": false
+  "runtime_modified": false,
+  "source_zip_sha256": "87def3bb4a10ebba5ee4bbf2cdc3d709abc99fdb8280ac36d2f7b6aa7bd4d849"
 }
