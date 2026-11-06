@@ -262,7 +262,7 @@ class HyundaiBluelinkCarClimateControlSwitch(HyundaiBluelinkEntity, ClimateEntit
         Not derivable: the API has no cabin temperature to compare a
         setpoint against (issue #1871).
         """
-        if not self.vehicle.air_control_is_on:
+        if self.vehicle.air_control_is_on is False:
             return HVACAction.OFF
         return None
 
