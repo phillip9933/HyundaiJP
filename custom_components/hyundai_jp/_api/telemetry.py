@@ -87,6 +87,23 @@ class JapanTelemetry:
     def _update_vehicle_properties(
         self, vehicle: Vehicle, state: dict[str, Any]
     ) -> None:
+        """Apply legacy sections in wire-decoder order; publish raw state last."""
+        self._parse_legacy_core(vehicle, state)
+        self._parse_legacy_cabin(vehicle, state)
+        self._parse_legacy_openings(vehicle, state)
+        self._parse_legacy_tires(vehicle, state)
+        vehicle.trunk_is_open = get_child_value(state, "status.trunkOpen")
+        self._parse_legacy_battery_and_range(vehicle, state)
+        self._parse_legacy_charge_estimates_and_limits(vehicle, state)
+        self._parse_legacy_fuel_and_target_ranges(vehicle, state)
+        self._parse_legacy_departures(vehicle, state)
+        self._parse_legacy_off_peak(vehicle, state)
+        self._parse_legacy_operating_state(vehicle, state)
+        self._parse_legacy_location(vehicle, state)
+        vehicle.data = state
+
+    def _parse_legacy_core(self, vehicle: Vehicle, state: dict[str, Any]) -> None:
+        """Source time, odometer, auxiliary battery and engine state."""
         vehicle.last_updated_at = parse_datetime(
             get_child_value(state, "status.time"), self.data_timezone
         )
@@ -106,6 +123,8 @@ class JapanTelemetry:
         )
         vehicle.engine_is_running = get_child_value(state, "status.engine")
 
+    def _parse_legacy_cabin(self, vehicle: Vehicle, state: dict[str, Any]) -> None:
+        """Profile-independent heater and physical seat readings."""
         vehicle.defrost_is_on = _heater_flag(get_child_value(state, "status.defrost"))
         steer_wheel_heat = get_child_value(state, "status.steerWheelHeat")
         vehicle.steering_wheel_heater_is_on = _heater_flag(steer_wheel_heat)
@@ -128,6 +147,9 @@ class JapanTelemetry:
         vehicle.rear_right_seat_status = SEAT_STATUS.get(
             get_child_value(state, "status.seatHeaterVentState.rrSeatHeatState")
         )
+
+    def _parse_legacy_openings(self, vehicle: Vehicle, state: dict[str, Any]) -> None:
+        """Door locks, doors, hood and physical window readings."""
         vehicle.is_locked = get_child_value(state, "status.doorLock")
         vehicle.front_left_door_is_open = get_child_value(
             state, "status.doorOpen.frontLeft"
@@ -154,6 +176,9 @@ class JapanTelemetry:
         vehicle.back_right_window_is_open = get_child_value(
             state, "status.windowOpen.backRight"
         )
+
+    def _parse_legacy_tires(self, vehicle: Vehicle, state: dict[str, Any]) -> None:
+        """Unknown-preserving tire warning flags."""
         vehicle.tire_pressure_rear_left_warning_is_on = flag_or_none(
             get_child_value(state, "status.tirePressureLamp.tirePressureLampRL")
         )
@@ -169,7 +194,11 @@ class JapanTelemetry:
         vehicle.tire_pressure_all_warning_is_on = flag_or_none(
             get_child_value(state, "status.tirePressureLamp.tirePressureLampAll")
         )
-        vehicle.trunk_is_open = get_child_value(state, "status.trunkOpen")
+
+    def _parse_legacy_battery_and_range(
+        self, vehicle: Vehicle, state: dict[str, Any]
+    ) -> None:
+        """Traction battery, plug, charge door and electric driving range."""
         vehicle.ev_battery_percentage = get_child_value(
             state, "status.evStatus.batteryStatus"
         )
@@ -238,6 +267,11 @@ class JapanTelemetry:
                     )
                 ],
             )
+
+    def _parse_legacy_charge_estimates_and_limits(
+        self, vehicle: Vehicle, state: dict[str, Any]
+    ) -> None:
+        """Charge-duration estimates and stored AC/DC targets."""
         vehicle.ev_estimated_current_charge_duration = (
             get_child_value(state, "status.evStatus.remainTime2.atc.value"),
             "m",
@@ -267,6 +301,11 @@ class JapanTelemetry:
             ][-1]
         except Exception:
             _LOGGER.debug(f"{DOMAIN} - SOC Levels couldn't be found. May not be an EV.")
+
+    def _parse_legacy_fuel_and_target_ranges(
+        self, vehicle: Vehicle, state: dict[str, Any]
+    ) -> None:
+        """Fuel driving range and ranges at the stored charge targets."""
         if (
             get_child_value(
                 state,
@@ -322,6 +361,9 @@ class JapanTelemetry:
                 )
             ],
         )
+
+    def _parse_legacy_departures(self, vehicle: Vehicle, state: dict[str, Any]) -> None:
+        """Independent departure activation, days and timer values."""
         vehicle.ev_first_departure_enabled = get_child_value(
             state,
             "status.evStatus.reservChargeInfos.reservChargeInfo.reservChargeInfoDetail.reservChargeSet",
@@ -361,6 +403,8 @@ class JapanTelemetry:
             ),
         )
 
+    def _parse_legacy_off_peak(self, vehicle: Vehicle, state: dict[str, Any]) -> None:
+        """Stored off-peak timer values and tariff mode."""
         vehicle.ev_off_peak_start_time = self._get_time_from_string(
             get_child_value(
                 state,
@@ -407,6 +451,10 @@ class JapanTelemetry:
             ):
                 vehicle.ev_off_peak_charge_only_enabled = False
 
+    def _parse_legacy_operating_state(
+        self, vehicle: Vehicle, state: dict[str, Any]
+    ) -> None:
+        """Fluid/fuel warnings, climate activity and key battery warning."""
         vehicle.washer_fluid_warning_is_on = get_child_value(
             state, "status.washerFluidStatus"
         )
@@ -420,6 +468,8 @@ class JapanTelemetry:
             get_child_value(state, "status.smartKeyBatteryWarning")
         )
 
+    def _parse_legacy_location(self, vehicle: Vehicle, state: dict[str, Any]) -> None:
+        """Optional parking coordinates and their source time."""
         if get_child_value(state, "vehicleLocation.coord.lat"):
             vehicle.location = (
                 get_child_value(state, "vehicleLocation.coord.lat"),
@@ -428,7 +478,6 @@ class JapanTelemetry:
                     get_child_value(state, "vehicleLocation.time"), self.data_timezone
                 ),
             )
-        vehicle.data = state
 
     def _update_vehicle_properties_ccs2(
         self, vehicle: Vehicle, state: dict[str, Any]
