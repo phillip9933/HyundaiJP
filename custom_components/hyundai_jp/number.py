@@ -16,6 +16,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from ._api import Vehicle
+from ._api.control_validation import is_finite_number
 from .const import DOMAIN
 from .coordinator import HyundaiJPConfigEntry, JapanDataUpdateCoordinator
 from .entity import HyundaiBluelinkEntity
@@ -105,10 +106,21 @@ class HyundaiBluelinkNumber(NumberEntity, HyundaiBluelinkEntity):
     @staticmethod
     def _is_valid_charge_limit(val: float | None) -> TypeGuard[float]:
         """Check if a charge limit value is a valid integer 50-100 in steps of 10."""
-        return isinstance(val, (int, float)) and int(val) in range(50, 101, 10)
+        return is_finite_number(val) and val in range(50, 101, 10)
 
     async def async_set_native_value(self, value: float) -> None:
         """Set new charging limit."""
+        step = self.native_step
+        if (
+            not is_finite_number(value)
+            or not self.native_min_value <= value <= self.native_max_value
+            or step is None
+            or step <= 0
+            or (value - self.native_min_value) % step
+        ):
+            raise HomeAssistantError(
+                "Choose a supported whole-number limit in the slider's range and steps"
+            )
         if (
             self.entity_description.key == AC_CHARGING_LIMIT_KEY
             and self.vehicle.ev_charge_limits_ac == int(value)
