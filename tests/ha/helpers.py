@@ -58,6 +58,8 @@ def make_operation_coordinator() -> JapanDataUpdateCoordinator:
     result.vehicle_manager.get_vehicle.side_effect = lambda vehicle_id: (
         result.vehicle_manager.vehicles[vehicle_id]
     )
+    result.last_update_success = True
+    result.vehicle_manager.vehicles.__iter__.side_effect = lambda: iter(["CAR"])
     result.data = None
     result.hass = MagicMock()
     result.hass.async_add_executor_job = AsyncMock()

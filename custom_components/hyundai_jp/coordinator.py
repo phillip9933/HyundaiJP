@@ -310,7 +310,7 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[None]):
                     await self._async_poll_vehicle(vehicle_id, mode="cached")
             except AuthenticationError as err:
                 failed.add(vehicle_id)
-                self._log_vehicle_failure(vehicle_id, err)
+                self._record_vehicle_failure(vehicle_id, err)
             except ConfigEntryAuthFailed:
                 raise
             except RateLimitingError as err:
@@ -319,15 +319,20 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[None]):
                 ) from err
             except APIError as err:
                 failed.add(vehicle_id)
-                self._log_vehicle_failure(vehicle_id, err)
+                self._record_vehicle_failure(vehicle_id, err)
             except Exception as err:
                 # UpdateFailed is logged without a traceback.
                 _LOGGER.exception("%s - Error communicating with API", DOMAIN)
                 raise UpdateFailed(f"Error communicating with API: {err}") from err
             else:
-                self._vehicle_failures.pop(vehicle_id, None)
-        self._failed_vehicles = failed
+                vehicle = self.vehicle_manager.vehicles[vehicle_id]
+                if vehicle.enabled:
+                    self._record_vehicle_success(vehicle_id)
         active = self.vehicle_manager.vehicles.keys()
+        self._failed_vehicles.intersection_update(active)
+        for vehicle_id in list(self._vehicle_failures):
+            if vehicle_id not in active:
+                del self._vehicle_failures[vehicle_id]
         for state in (self._force_refresh_failures, self._force_refresh_retry_at):
             for vehicle_id in list(state):
                 if vehicle_id not in active:
@@ -391,6 +396,40 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[None]):
                 self._force_refresh_failures.pop(vehicle_id, None)
                 self._force_refresh_retry_at.pop(vehicle_id, None)
 
+    def _record_vehicle_success(self, vehicle_id: str) -> None:
+        """A successful state read recovers this car, not the whole account."""
+        self._failed_vehicles.discard(vehicle_id)
+        self._vehicle_failures.pop(vehicle_id, None)
+
+    def _record_vehicle_failure(self, vehicle_id: str, err: Exception) -> None:
+        self._failed_vehicles.add(vehicle_id)
+        self._log_vehicle_failure(vehicle_id, err)
+
+    def _publish_vehicle_state(self) -> None:
+        """Publish local recovery without clearing an account error/backoff."""
+        if self.last_update_success:
+            self.async_set_updated_data(self.data)
+        else:
+            self.async_update_listeners()
+
+    async def _async_read_vehicle_state(
+        self, vehicle_id: str, reader: Callable[[str], None]
+    ) -> None:
+        """Record the outcome of one state read; never replay a command."""
+        vehicle = self.vehicle_manager.get_vehicle(vehicle_id)
+        try:
+            await self._async_run_executor_job(reader, vehicle_id)
+        except AuthenticationError, RateLimitingError:
+            # Account failures retain their existing handling and are never
+            # interpreted as successful state reads or retried here.
+            raise
+        except Exception as err:
+            self._record_vehicle_failure(vehicle_id, err)
+            raise
+        else:
+            if vehicle.enabled:
+                self._record_vehicle_success(vehicle_id)
+
     def _log_vehicle_failure(self, vehicle_id: str, err: Exception) -> None:
         vehicle = self.vehicle_manager.vehicles[vehicle_id]
         failures = self._vehicle_failures.get(vehicle_id, 0) + 1
@@ -407,7 +446,7 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[None]):
             # A vehicle the backend no longer serves (e.g. a sold car) fails
             # every poll; stop polling it by disabling the device in HA.
             _LOGGER.warning(
-                "%s - Vehicle %s (%s) failed %s polls in a row. If the backend "
+                "%s - Vehicle %s (%s) failed %s state reads in a row. If the backend "
                 "no longer serves it, disable its device in Home Assistant "
                 "to stop polling it.",
                 DOMAIN,
@@ -681,10 +720,12 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[None]):
         self._ensure_not_closing()
         async with self._async_region_operation():
             await self.async_check_and_refresh_token()
-            await self._async_run_executor_job(
-                self.vehicle_manager.force_refresh_vehicle_state, vehicle_id
-            )
-            self.async_set_updated_data(self.data)
+            try:
+                await self._async_read_vehicle_state(
+                    vehicle_id, self.vehicle_manager.force_refresh_vehicle_state
+                )
+            finally:
+                self._publish_vehicle_state()
 
     def get_svm_image_updated_at(self, vehicle_id: str) -> dt.datetime | None:
         """Return the capture time, or local receipt time when GPS time is absent."""
@@ -805,10 +846,15 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[None]):
                         except Exception:
                             diagnostic["read_errors"] += 1
                             diagnostic["last_result"] = "reader_error"
+                            self._failed_vehicles.add(vehicle_id)
+                            self._vehicle_failures[vehicle_id] = (
+                                self._vehicle_failures.get(vehicle_id, 0) + 1
+                            )
                             if diagnostic["read_errors"] == 1:
                                 _LOGGER.warning(
                                     "Japan passive state update could not be applied"
                                 )
+                            self.async_update_listeners()
                         else:
                             diagnostic["last_result"] = (
                                 "newer_telemetry_applied"
@@ -817,7 +863,8 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[None]):
                             )
                             if changed is True:
                                 diagnostic["updates_applied"] += 1
-                                self.async_set_updated_data(self.data)
+                                self._record_vehicle_success(vehicle_id)
+                                self._publish_vehicle_state()
                 remaining = (
                     self._post_command_watch_deadlines[vehicle_id]
                     - self._post_command_watch_clock()
@@ -868,10 +915,10 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[None]):
     async def _async_refresh_command_state(self, status: ORDER_STATUS | None) -> None:
         """Read cached state separately from service acceptance or execution."""
         try:
-            await self._async_run_executor_job(
-                self.vehicle_manager.update_all_vehicles_with_cached_state
-            )
-            self.async_set_updated_data(self.data)
+            for vehicle_id in list(self.vehicle_manager.vehicles):
+                await self._async_read_vehicle_state(
+                    vehicle_id, self.vehicle_manager.update_vehicle_with_cached_state
+                )
         except Exception as err:
             if status in (ORDER_STATUS.SUCCESS, ORDER_STATUS.ACCEPTED):
                 message = (
@@ -881,6 +928,8 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[None]):
                 )
                 raise _ConfirmedCommandRefreshError(message) from err
             _LOGGER.warning("Cached status refresh after unconfirmed command failed")
+        finally:
+            self._publish_vehicle_state()
 
     async def async_await_action_and_refresh(
         self, vehicle_id: str, action_id: str

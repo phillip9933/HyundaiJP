@@ -54,7 +54,7 @@ def pipeline(body=None, failure=None):
     )
     vehicle = Vehicle(id="synthetic-car", ccu_ccs2_protocol_support=1, is_locked=True)
     manager.vehicles = {vehicle.id: vehicle}
-    manager.update_all_vehicles_with_cached_state = Mock()
+    manager.update_vehicle_with_cached_state = Mock()
     result = make_operation_coordinator()
     result.vehicle_manager = manager
     result._start_post_command_state_watch = Mock()
@@ -87,7 +87,7 @@ async def test_service_result_accepted_with_no_mqtt_reply(action, command):
     assert (
         vehicle.is_locked is True
     )  # HTTP acceptance never fabricates a sensor change.
-    manager.update_all_vehicles_with_cached_state.assert_called_once()
+    manager.update_vehicle_with_cached_state.assert_called_once()
     result._start_post_command_state_watch.assert_called_once_with(vehicle.id)
     result.async_set_updated_data.assert_called_once()
     assert not result._action_lock.locked()
@@ -106,7 +106,7 @@ async def test_service_result_does_not_require_mqtt_correlation_id():
 
 async def test_accepted_command_still_watches_when_initial_cached_read_fails():
     result, api, manager, _helper, vehicle = pipeline()
-    manager.update_all_vehicles_with_cached_state.side_effect = RuntimeError(
+    manager.update_vehicle_with_cached_state.side_effect = RuntimeError(
         "synthetic cached read failure"
     )
     with pytest.raises(HomeAssistantError, match="service accepted the request"):

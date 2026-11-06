@@ -29,7 +29,7 @@ async def test_unconfirmed_command_raises_after_refresh(monkeypatch, status):
         await result.async_lock_vehicle("CAR")
     result.async_refresh.assert_not_awaited()
     result.hass.async_add_executor_job.assert_awaited_with(
-        result.vehicle_manager.update_all_vehicles_with_cached_state
+        result.vehicle_manager.update_vehicle_with_cached_state, "CAR"
     )
 
 
@@ -46,7 +46,7 @@ async def test_confirmed_command_completes(monkeypatch):
     await result.async_lock_vehicle("CAR")
     result.async_refresh.assert_not_awaited()
     result.hass.async_add_executor_job.assert_awaited_with(
-        result.vehicle_manager.update_all_vehicles_with_cached_state
+        result.vehicle_manager.update_vehicle_with_cached_state, "CAR"
     )
 
 

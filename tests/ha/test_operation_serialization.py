@@ -74,7 +74,7 @@ async def test_command_poll_and_manual_force_cannot_replace_active_session(monke
             started.set()
             await release.wait()
             return ORDER_STATUS.SUCCESS
-        if fn is result.vehicle_manager.update_all_vehicles_with_cached_state:
+        if fn is result.vehicle_manager.update_vehicle_with_cached_state:
             return None
         return "synthetic-action"
 

@@ -40,12 +40,12 @@ async def test_delayed_passive_state_reaches_lock_and_ha_activity_event():
 
     latest_locked = [True]
 
-    def read_cached_state():
+    def read_cached_state(vehicle_id):
         vehicle.is_locked = latest_locked[0]
         if not latest_locked[0]:
             vehicle.last_updated_at = dt.datetime(2026, 11, 3, 0, 0, 20, tzinfo=dt.UTC)
 
-    result.vehicle_manager.update_all_vehicles_with_cached_state.side_effect = (
+    result.vehicle_manager.update_vehicle_with_cached_state.side_effect = (
         read_cached_state
     )
 
@@ -74,7 +74,7 @@ async def test_delayed_passive_state_reaches_lock_and_ha_activity_event():
     ]
     result.vehicle_manager.unlock.assert_not_called()
     result.vehicle_manager.force_refresh_vehicle_state.assert_not_called()
-    assert result.vehicle_manager.update_all_vehicles_with_cached_state.call_count == 2
+    assert result.vehicle_manager.update_vehicle_with_cached_state.call_count == 2
 
 
 async def test_passive_watcher_observes_late_unlock_after_unrelated_update():
@@ -156,5 +156,5 @@ async def test_passive_watcher_observes_late_unlock_after_unrelated_update():
     result.async_check_and_refresh_token.assert_not_awaited()
     result.vehicle_manager.unlock.assert_not_called()
     result.vehicle_manager.force_refresh_vehicle_state.assert_not_called()
-    result.vehicle_manager.update_all_vehicles_with_cached_state.assert_not_called()
+    result.vehicle_manager.update_vehicle_with_cached_state.assert_not_called()
     assert elapsed[0] >= result._POST_COMMAND_WATCH_SECONDS
