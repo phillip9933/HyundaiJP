@@ -32,6 +32,11 @@ from .Vehicle import Vehicle
 _LOGGER = logging.getLogger(__name__)
 
 
+def _heater_flag(value: Any) -> bool | None:
+    """Decode heater/CCS2 door flags: 0 and 2 are off, 1 is on."""
+    return False if value == 2 else flag_or_none(value)
+
+
 class JapanTelemetry:
     """Map Japan status documents to vehicle fields without performing I/O."""
 
@@ -110,18 +115,15 @@ class JapanTelemetry:
                 )
             except ValueError, IndexError:
                 _LOGGER.debug(f"{DOMAIN} - Unparsable airTemp value: {air_temp_value}")
-        vehicle.defrost_is_on = get_child_value(state, "status.defrost")
+        vehicle.defrost_is_on = _heater_flag(get_child_value(state, "status.defrost"))
         steer_wheel_heat = get_child_value(state, "status.steerWheelHeat")
-        if steer_wheel_heat in [0, 2]:
-            vehicle.steering_wheel_heater_is_on = False
-        elif steer_wheel_heat == 1:
-            vehicle.steering_wheel_heater_is_on = True
+        vehicle.steering_wheel_heater_is_on = _heater_flag(steer_wheel_heat)
 
-        vehicle.back_window_heater_is_on = get_child_value(
-            state, "status.sideBackWindowHeat"
+        vehicle.back_window_heater_is_on = _heater_flag(
+            get_child_value(state, "status.sideBackWindowHeat")
         )
-        vehicle.side_mirror_heater_is_on = get_child_value(
-            state, "status.sideMirrorHeat"
+        vehicle.side_mirror_heater_is_on = _heater_flag(
+            get_child_value(state, "status.sideMirrorHeat")
         )
         vehicle.front_left_seat_status = SEAT_STATUS.get(
             get_child_value(state, "status.seatHeaterVentState.flSeatHeatState")
@@ -161,19 +163,19 @@ class JapanTelemetry:
         vehicle.back_right_window_is_open = get_child_value(
             state, "status.windowOpen.backRight"
         )
-        vehicle.tire_pressure_rear_left_warning_is_on = bool(
+        vehicle.tire_pressure_rear_left_warning_is_on = flag_or_none(
             get_child_value(state, "status.tirePressureLamp.tirePressureLampRL")
         )
-        vehicle.tire_pressure_front_left_warning_is_on = bool(
+        vehicle.tire_pressure_front_left_warning_is_on = flag_or_none(
             get_child_value(state, "status.tirePressureLamp.tirePressureLampFL")
         )
-        vehicle.tire_pressure_front_right_warning_is_on = bool(
+        vehicle.tire_pressure_front_right_warning_is_on = flag_or_none(
             get_child_value(state, "status.tirePressureLamp.tirePressureLampFR")
         )
-        vehicle.tire_pressure_rear_right_warning_is_on = bool(
+        vehicle.tire_pressure_rear_right_warning_is_on = flag_or_none(
             get_child_value(state, "status.tirePressureLamp.tirePressureLampRR")
         )
-        vehicle.tire_pressure_all_warning_is_on = bool(
+        vehicle.tire_pressure_all_warning_is_on = flag_or_none(
             get_child_value(state, "status.tirePressureLamp.tirePressureLampAll")
         )
         vehicle.trunk_is_open = get_child_value(state, "status.trunkOpen")
@@ -192,6 +194,7 @@ class JapanTelemetry:
             state, "status.evStatus.chargePortDoorOpenStatus"
         )
 
+        vehicle.ev_charge_port_door_is_open = None
         if ev_charge_port_door_is_open == 1:
             vehicle.ev_charge_port_door_is_open = True
         elif ev_charge_port_door_is_open == 2:
@@ -422,8 +425,8 @@ class JapanTelemetry:
         vehicle.fuel_level = get_child_value(state, "status.fuelLevel")
         vehicle.fuel_level_is_low = get_child_value(state, "status.lowFuelLight")
         vehicle.air_control_is_on = get_child_value(state, "status.airCtrlOn")
-        vehicle.smart_key_battery_warning_is_on = get_child_value(
-            state, "status.smartKeyBatteryWarning"
+        vehicle.smart_key_battery_warning_is_on = flag_or_none(
+            get_child_value(state, "status.smartKeyBatteryWarning")
         )
 
         if get_child_value(state, "vehicleLocation.coord.lat"):
@@ -507,22 +510,13 @@ class JapanTelemetry:
             )
 
         defrost_is_on = get_child_value(state, "Body.Windshield.Front.Defog.State")
-        if defrost_is_on in [0, 2]:
-            vehicle.defrost_is_on = False
-        elif defrost_is_on == 1:
-            vehicle.defrost_is_on = True
+        vehicle.defrost_is_on = _heater_flag(defrost_is_on)
 
         steer_wheel_heat = get_child_value(state, "Cabin.SteeringWheel.Heat.State")
-        if steer_wheel_heat in [0, 2]:
-            vehicle.steering_wheel_heater_is_on = False
-        elif steer_wheel_heat == 1:
-            vehicle.steering_wheel_heater_is_on = True
+        vehicle.steering_wheel_heater_is_on = _heater_flag(steer_wheel_heat)
 
         defrost_rear_is_on = get_child_value(state, "Body.Windshield.Rear.Defog.State")
-        if defrost_rear_is_on in [0, 2]:
-            vehicle.back_window_heater_is_on = False
-        elif defrost_rear_is_on == 1:
-            vehicle.back_window_heater_is_on = True
+        vehicle.back_window_heater_is_on = _heater_flag(defrost_rear_is_on)
 
         # TODO: status.sideMirrorHeat
 
@@ -648,19 +642,19 @@ class JapanTelemetry:
 
     def _parse_ccs2_tires(self, vehicle: Vehicle, state: dict[str, Any]) -> None:
         """Tire warnings and profile-scaled pressure readings."""
-        vehicle.tire_pressure_rear_left_warning_is_on = bool(
+        vehicle.tire_pressure_rear_left_warning_is_on = flag_or_none(
             get_child_value(state, "Chassis.Axle.Row2.Left.Tire.PressureLow")
         )
-        vehicle.tire_pressure_front_left_warning_is_on = bool(
+        vehicle.tire_pressure_front_left_warning_is_on = flag_or_none(
             get_child_value(state, "Chassis.Axle.Row1.Left.Tire.PressureLow")
         )
-        vehicle.tire_pressure_front_right_warning_is_on = bool(
+        vehicle.tire_pressure_front_right_warning_is_on = flag_or_none(
             get_child_value(state, "Chassis.Axle.Row1.Right.Tire.PressureLow")
         )
-        vehicle.tire_pressure_rear_right_warning_is_on = bool(
+        vehicle.tire_pressure_rear_right_warning_is_on = flag_or_none(
             get_child_value(state, "Chassis.Axle.Row2.Right.Tire.PressureLow")
         )
-        vehicle.tire_pressure_all_warning_is_on = bool(
+        vehicle.tire_pressure_all_warning_is_on = flag_or_none(
             get_child_value(state, "Chassis.Axle.Tire.PressureLow")
         )
         # Tire pressure values (model B: raw is in the car's display unit; the
@@ -853,10 +847,7 @@ class JapanTelemetry:
                 )
                 vehicle.ev_connector_fastening_state = None
         charging_door_state = get_child_value(state, "Green.ChargingDoor.State")
-        if charging_door_state in [0, 2]:
-            vehicle.ev_charge_port_door_is_open = False
-        elif charging_door_state == 1:
-            vehicle.ev_charge_port_door_is_open = True
+        vehicle.ev_charge_port_door_is_open = _heater_flag(charging_door_state)
 
     def _parse_ccs2_range_and_charging(
         self, vehicle: Vehicle, state: dict[str, Any]
@@ -1132,7 +1123,7 @@ class JapanTelemetry:
         vehicle.air_control_is_on = get_child_value(
             state, "Cabin.HVAC.Row1.Driver.Blower.SpeedLevel"
         )
-        vehicle.smart_key_battery_warning_is_on = bool(
+        vehicle.smart_key_battery_warning_is_on = flag_or_none(
             get_child_value(state, "Electronics.FOB.LowBattery")
         )
         if vehicle._ev_estimated_current_charge_duration is not None:
