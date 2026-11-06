@@ -17,5 +17,5 @@ def fixtures_dir() -> pathlib.Path:
 
 @pytest.fixture
 def telemetry_parser() -> JapanTelemetry:
-    """A real, I/O-free parser with deterministic UTC time and test scale."""
-    return JapanTelemetry(temperature_range=tuple(x * 0.5 for x in range(28, 60)))
+    """A real, I/O-free parser using source timestamps in UTC."""
+    return JapanTelemetry()

@@ -1,9 +1,8 @@
 """Japan legacy and CCS2 telemetry parsing without network or session state."""
 
-from collections.abc import Sequence
 import datetime as dt
 import logging
-from typing import Any, cast
+from typing import Any
 
 from .const import (
     CONNECTOR_FASTENING_STATE,
@@ -21,7 +20,6 @@ from .utils import (
     ccs2_reservation_time_or_none,
     flag_or_none,
     get_child_value,
-    get_hex_temp_into_index,
     normalize_battery_soc,
     normalize_battery_soh,
     parse_datetime,
@@ -59,11 +57,8 @@ def _temperature_unit(value: Any) -> str | None:
 class JapanTelemetry:
     """Map Japan status documents to vehicle fields without performing I/O."""
 
-    def __init__(
-        self, data_timezone: dt.tzinfo = dt.UTC, temperature_range: Sequence[float] = ()
-    ) -> None:
+    def __init__(self, data_timezone: dt.tzinfo = dt.UTC) -> None:
         self.data_timezone = data_timezone
-        self.temperature_range = temperature_range
 
     def _get_time_from_string(self, value: Any, timesection: Any) -> dt.time | None:
         if value is None:
@@ -92,12 +87,9 @@ class JapanTelemetry:
     def _update_vehicle_properties(
         self, vehicle: Vehicle, state: dict[str, Any]
     ) -> None:
-        if get_child_value(state, "status.time"):
-            vehicle.last_updated_at = parse_datetime(
-                get_child_value(state, "status.time"), self.data_timezone
-            )
-        else:
-            vehicle.last_updated_at = dt.datetime.now(self.data_timezone)
+        vehicle.last_updated_at = parse_datetime(
+            get_child_value(state, "status.time"), self.data_timezone
+        )
 
         if get_child_value(state, "status.odometer.value"):
             vehicle.odometer = (
@@ -114,26 +106,6 @@ class JapanTelemetry:
         )
         vehicle.engine_is_running = get_child_value(state, "status.engine")
 
-        # Converts temp to usable number. Currently only support celsius.
-        # "FFH" is the CN sentinel for "no valid temperature" (AC off / not
-        # reported) — live-verified on a 2025 Custo.  Its decoded index falls
-        # far outside temperature_range, so skip it silently instead of
-        # raising IndexError.
-        air_temp_value = get_child_value(state, "status.airTemp.value")
-        if air_temp_value and air_temp_value != "FFH":
-            try:
-                tempIndex = cast(int, get_hex_temp_into_index(air_temp_value))
-                vehicle.air_temperature = (
-                    self.temperature_range[tempIndex],
-                    TEMPERATURE_UNITS[
-                        get_child_value(
-                            state,
-                            "status.airTemp.unit",
-                        )
-                    ],
-                )
-            except ValueError, IndexError:
-                _LOGGER.debug(f"{DOMAIN} - Unparsable airTemp value: {air_temp_value}")
         vehicle.defrost_is_on = _heater_flag(get_child_value(state, "status.defrost"))
         steer_wheel_heat = get_child_value(state, "status.steerWheelHeat")
         vehicle.steering_wheel_heater_is_on = _heater_flag(steer_wheel_heat)
@@ -489,7 +461,7 @@ class JapanTelemetry:
                 date.astimezone(self.data_timezone) if date else None
             )
         else:
-            vehicle.last_updated_at = dt.datetime.now(self.data_timezone)
+            vehicle.last_updated_at = None
 
         vehicle.odometer = (
             get_child_value(state, "Drivetrain.Odometer"),

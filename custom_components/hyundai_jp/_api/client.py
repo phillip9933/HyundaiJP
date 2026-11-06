@@ -47,12 +47,10 @@ class HyundaiBluelinkApi(JapanCommandsMixin, JapanSVM, JapanAuthClient):
 
     data_timezone = ZoneInfo("Asia/Tokyo")
     FORCE_REFRESH_TIMEOUT = 120
-    # Legacy temperature conversion uses per-vehicle Japan profile metadata.
-    temperature_range: tuple[float, ...] = ()
 
     def __init__(self) -> None:
         super().__init__()
-        self._telemetry = JapanTelemetry(self.data_timezone, self.temperature_range)
+        self._telemetry = JapanTelemetry(self.data_timezone)
         self._geocode_coordinates: dict[str, tuple[float, float]] = {}
         self._geocode_retry_at: dict[str, float] = {}
         self._geocode_diagnostics: dict[str, Any] = {}
