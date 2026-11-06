@@ -1,5 +1,6 @@
 """Services for Hyundai Bluelink JP integration."""
 
+from collections.abc import Mapping
 from datetime import time
 import logging
 from typing import Any, cast
@@ -70,6 +71,137 @@ SUPPORTED_SERVICES = (
 _LOGGER = logging.getLogger(__name__)
 
 
+def _climate_options(data: Mapping[str, Any]) -> ClimateRequestOptions:
+    """Map nullable climate settings without inventing unspecified choices."""
+    duration = data.get("duration")
+    set_temp = data.get("temperature")
+    climate = data.get("climate")
+    heating = data.get("heating")
+    defrost = data.get("defrost")
+    front_left_seat = data.get("flseat")
+    front_right_seat = data.get("frseat")
+    rear_left_seat = data.get("rlseat")
+    rear_right_seat = data.get("rrseat")
+    steering_wheel = data.get("steering_wheel")
+
+    # Confirm values are correct datatype
+    if heating is not None:
+        heating = int(heating)
+    if front_left_seat is not None:
+        front_left_seat = int(front_left_seat)
+    if front_right_seat is not None:
+        front_right_seat = int(front_right_seat)
+    if rear_left_seat is not None:
+        rear_left_seat = int(rear_left_seat)
+    if rear_right_seat is not None:
+        rear_right_seat = int(rear_right_seat)
+    if steering_wheel is not None:
+        steering_wheel = int(steering_wheel)
+
+    return ClimateRequestOptions(
+        duration=duration,
+        set_temp=set_temp,
+        climate=climate,
+        heating=heating,
+        defrost=defrost,
+        front_left_seat=front_left_seat,
+        front_right_seat=front_right_seat,
+        rear_left_seat=rear_left_seat,
+        rear_right_seat=rear_right_seat,
+        steering_wheel=steering_wheel,
+    )
+
+
+def _departure_options(
+    departure_enabled: bool | None,
+    departure_days: list[int] | None,
+    departure_time: str | None,
+) -> ScheduleChargingClimateRequestOptions.DepartureOptions | None:
+    """Keep an absent slot distinct from explicitly disabled or empty days."""
+    if all(
+        value is None for value in (departure_enabled, departure_days, departure_time)
+    ):
+        return None
+    return ScheduleChargingClimateRequestOptions.DepartureOptions(
+        enabled=None if departure_enabled is None else bool(departure_enabled),
+        days=None if departure_days is None else [int(day) for day in departure_days],
+        time=None if departure_time is None else time.fromisoformat(departure_time),
+    )
+
+
+def _schedule_options(data: Mapping[str, Any]) -> ScheduleChargingClimateRequestOptions:
+    """Translate only supplied schedule changes into an API request."""
+    first_departure_enabled = data.get("first_departure_enabled")
+    first_departure_days = data.get("first_departure_days")
+    first_departure_time = data.get("first_departure_time")
+    second_departure_enabled = data.get("second_departure_enabled")
+    second_departure_days = data.get("second_departure_days")
+    second_departure_time = data.get("second_departure_time")
+    charging_enabled = data.get("charging_enabled")
+    off_peak_start_time = data.get("off_peak_start_time")
+    off_peak_end_time = data.get("off_peak_end_time")
+    off_peak_charge_only_enabled = data.get("off_peak_charge_only_enabled")
+    climate_enabled = data.get("climate_enabled")
+    temperature = data.get("temperature")
+    temperature_unit = data.get("temperature_unit")
+    defrost = data.get("defrost")
+
+    first_departure = _departure_options(
+        first_departure_enabled, first_departure_days, first_departure_time
+    )
+    second_departure = _departure_options(
+        second_departure_enabled, second_departure_days, second_departure_time
+    )
+    if charging_enabled is not None:
+        charging_enabled = bool(charging_enabled)
+    if off_peak_start_time is not None:
+        off_peak_start_time = time.fromisoformat(off_peak_start_time)
+    if off_peak_end_time is not None:
+        off_peak_end_time = time.fromisoformat(off_peak_end_time)
+    if off_peak_charge_only_enabled is not None:
+        off_peak_charge_only_enabled = bool(off_peak_charge_only_enabled)
+    if climate_enabled is not None:
+        climate_enabled = bool(climate_enabled)
+    if temperature is not None:
+        temperature = float(temperature)
+    if temperature_unit is not None:
+        temperature_unit = int(temperature_unit)
+    if defrost is not None:
+        defrost = bool(defrost)
+
+    return ScheduleChargingClimateRequestOptions(
+        first_departure=first_departure,
+        second_departure=second_departure,
+        charging_enabled=charging_enabled,
+        off_peak_start_time=off_peak_start_time,
+        off_peak_end_time=off_peak_end_time,
+        off_peak_charge_only_enabled=off_peak_charge_only_enabled,
+        climate_enabled=climate_enabled,
+        temperature=temperature,
+        temperature_unit=temperature_unit,
+        defrost=defrost,
+    )
+
+
+def _navigation_pois(data: Mapping[str, Any]) -> list[POIInfo]:
+    """Map one requested destination into the API destination list."""
+    latitude = data["latitude"]
+    longitude = data["longitude"]
+    name = data["name"]
+    address = data.get("address", "")
+    zip_code = data.get("zip_code", "")
+    place_id = data.get("place_id", "")
+
+    poi = POIInfo(
+        coord=POICoord(lat=float(latitude), lon=float(longitude)),
+        name=name,
+        addr=address,
+        zip=zip_code,
+        place_id=place_id,
+    )
+    return [poi]
+
+
 @callback
 def async_setup_services(hass: HomeAssistant) -> bool:
     """Set up services for Hyundai Bluelink JP."""
@@ -85,44 +217,7 @@ def async_setup_services(hass: HomeAssistant) -> bool:
 
     async def async_handle_start_climate(call: ServiceCall) -> None:
         coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
-        duration = call.data.get("duration")
-        set_temp = call.data.get("temperature")
-        climate = call.data.get("climate")
-        heating = call.data.get("heating")
-        defrost = call.data.get("defrost")
-        front_left_seat = call.data.get("flseat")
-        front_right_seat = call.data.get("frseat")
-        rear_left_seat = call.data.get("rlseat")
-        rear_right_seat = call.data.get("rrseat")
-        steering_wheel = call.data.get("steering_wheel")
-
-        # Confirm values are correct datatype
-        if heating is not None:
-            heating = int(heating)
-        if front_left_seat is not None:
-            front_left_seat = int(front_left_seat)
-        if front_right_seat is not None:
-            front_right_seat = int(front_right_seat)
-        if rear_left_seat is not None:
-            rear_left_seat = int(rear_left_seat)
-        if rear_right_seat is not None:
-            rear_right_seat = int(rear_right_seat)
-        if steering_wheel is not None:
-            steering_wheel = int(steering_wheel)
-
-        climate_request_options = ClimateRequestOptions(
-            duration=duration,
-            set_temp=set_temp,
-            climate=climate,
-            heating=heating,
-            defrost=defrost,
-            front_left_seat=front_left_seat,
-            front_right_seat=front_right_seat,
-            rear_left_seat=rear_left_seat,
-            rear_right_seat=rear_right_seat,
-            steering_wheel=steering_wheel,
-        )
-        await coordinator.async_start_climate(vehicle_id, climate_request_options)
+        await coordinator.async_start_climate(vehicle_id, _climate_options(call.data))
 
     async def async_handle_stop_climate(call: ServiceCall) -> None:
         coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
@@ -187,77 +282,8 @@ def async_setup_services(hass: HomeAssistant) -> bool:
 
     async def async_handle_schedule_charging_and_climate(call: ServiceCall) -> None:
         coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
-        first_departure_enabled = call.data.get("first_departure_enabled")
-        first_departure_days = call.data.get("first_departure_days")
-        first_departure_time = call.data.get("first_departure_time")
-        second_departure_enabled = call.data.get("second_departure_enabled")
-        second_departure_days = call.data.get("second_departure_days")
-        second_departure_time = call.data.get("second_departure_time")
-        charging_enabled = call.data.get("charging_enabled")
-        off_peak_start_time = call.data.get("off_peak_start_time")
-        off_peak_end_time = call.data.get("off_peak_end_time")
-        off_peak_charge_only_enabled = call.data.get("off_peak_charge_only_enabled")
-        climate_enabled = call.data.get("climate_enabled")
-        temperature = call.data.get("temperature")
-        temperature_unit = call.data.get("temperature_unit")
-        defrost = call.data.get("defrost")
-
-        # Confirm values are correct datatype
-        def initialize_departure_option(
-            departure_enabled: Any, departure_days: Any, departure_time: Any
-        ) -> ScheduleChargingClimateRequestOptions.DepartureOptions | None:
-            if all(
-                value is None
-                for value in (departure_enabled, departure_days, departure_time)
-            ):
-                return None
-            return ScheduleChargingClimateRequestOptions.DepartureOptions(
-                enabled=None if departure_enabled is None else bool(departure_enabled),
-                days=None
-                if departure_days is None
-                else [int(day) for day in departure_days],
-                time=None
-                if departure_time is None
-                else time.fromisoformat(departure_time),
-            )
-
-        first_departure = initialize_departure_option(
-            first_departure_enabled, first_departure_days, first_departure_time
-        )
-        second_departure = initialize_departure_option(
-            second_departure_enabled, second_departure_days, second_departure_time
-        )
-        if charging_enabled is not None:
-            charging_enabled = bool(charging_enabled)
-        if off_peak_start_time is not None:
-            off_peak_start_time = time.fromisoformat(off_peak_start_time)
-        if off_peak_end_time is not None:
-            off_peak_end_time = time.fromisoformat(off_peak_end_time)
-        if off_peak_charge_only_enabled is not None:
-            off_peak_charge_only_enabled = bool(off_peak_charge_only_enabled)
-        if climate_enabled is not None:
-            climate_enabled = bool(climate_enabled)
-        if temperature is not None:
-            temperature = float(temperature)
-        if temperature_unit is not None:
-            temperature_unit = int(temperature_unit)
-        if defrost is not None:
-            defrost = bool(defrost)
-
-        schedule_options = ScheduleChargingClimateRequestOptions(
-            first_departure=first_departure,
-            second_departure=second_departure,
-            charging_enabled=charging_enabled,
-            off_peak_start_time=off_peak_start_time,
-            off_peak_end_time=off_peak_end_time,
-            off_peak_charge_only_enabled=off_peak_charge_only_enabled,
-            climate_enabled=climate_enabled,
-            temperature=temperature,
-            temperature_unit=temperature_unit,
-            defrost=defrost,
-        )
         await coordinator.async_schedule_charging_and_climate(
-            vehicle_id, schedule_options
+            vehicle_id, _schedule_options(call.data)
         )
 
     async def async_handle_set_off_peak_charging(call: ServiceCall) -> None:
@@ -294,21 +320,7 @@ def async_setup_services(hass: HomeAssistant) -> bool:
 
     async def async_handle_set_navigation(call: ServiceCall) -> None:
         coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
-        latitude = call.data["latitude"]
-        longitude = call.data["longitude"]
-        name = call.data["name"]
-        address = call.data.get("address", "")
-        zip_code = call.data.get("zip_code", "")
-        place_id = call.data.get("place_id", "")
-
-        poi = POIInfo(
-            coord=POICoord(lat=float(latitude), lon=float(longitude)),
-            name=name,
-            addr=address,
-            zip=zip_code,
-            place_id=place_id,
-        )
-        await coordinator.async_set_navigation(vehicle_id, [poi])
+        await coordinator.async_set_navigation(vehicle_id, _navigation_pois(call.data))
 
     async def async_handle_capture_svm_image(call: ServiceCall) -> None:
         coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
