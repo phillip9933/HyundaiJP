@@ -15,6 +15,7 @@ from .const import (
     TEMPERATURE_UNITS,
     PressureUnit,
 )
+from .control_validation import is_finite_number
 from .utils import (
     bool_or_none,
     ccs2_reservation_time_or_none,
@@ -35,6 +36,24 @@ _LOGGER = logging.getLogger(__name__)
 def _heater_flag(value: Any) -> bool | None:
     """Decode heater/CCS2 door flags: 0 and 2 are off, 1 is on."""
     return False if value == 2 else flag_or_none(value)
+
+
+def _number_or_none(value: Any) -> float | None:
+    """Read optional numeric telemetry without publishing bool/NaN/overflow."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return None
+    try:
+        number = float(value)
+    except ValueError, OverflowError:
+        return None
+    return number if is_finite_number(number) else None
+
+
+def _temperature_unit(value: Any) -> str | None:
+    """Accept established numeric temperature units, without hashing raw data."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return TEMPERATURE_UNITS[int(value)] if value in (0, 1) else None
 
 
 class JapanTelemetry:
@@ -494,20 +513,25 @@ class JapanTelemetry:
             "Cabin.HVAC.Row1.Driver.Temperature.Unit",
         )
 
-        if air_temp not in (None, "OFF") and unit in TEMPERATURE_UNITS:
-            vehicle.air_temperature = (air_temp, TEMPERATURE_UNITS[unit])
-        elif air_temp_unit := TEMPERATURE_UNITS.get(unit):
-            # With climate off the setpoint is "OFF" but the unit is still
-            # reported; keep it so consumers know the car's unit.
-            vehicle._air_temperature_unit = air_temp_unit
+        air_temp_unit = _temperature_unit(unit)
+        if air_temp == "OFF":
+            # OFF intentionally retains the previous target, not a current reading.
+            if air_temp_unit is not None:
+                vehicle._air_temperature_unit = air_temp_unit
+        else:
+            vehicle.air_temperature = (
+                _number_or_none(air_temp) if air_temp_unit is not None else None,
+                air_temp_unit,
+            )
 
         outside_temp = get_child_value(state, "Cabin.HVAC.OutsideTemperature.Value")
-        outside_temp_unit = get_child_value(state, "Cabin.HVAC.OutsideTemperature.Unit")
-        if outside_temp is not None and outside_temp_unit is not None:
-            vehicle.outside_temperature = (
-                outside_temp,
-                TEMPERATURE_UNITS[outside_temp_unit],
-            )
+        outside_temp_unit = _temperature_unit(
+            get_child_value(state, "Cabin.HVAC.OutsideTemperature.Unit")
+        )
+        vehicle.outside_temperature = (
+            _number_or_none(outside_temp) if outside_temp_unit is not None else None,
+            outside_temp_unit,
+        )
 
         defrost_is_on = get_child_value(state, "Body.Windshield.Front.Defog.State")
         vehicle.defrost_is_on = _heater_flag(defrost_is_on)
@@ -665,23 +689,16 @@ class JapanTelemetry:
         # See const.PRESSURE_UNITS / PRESSURE_SCALES. Per-tire *_unit labels are
         # read-only properties on Vehicle deriving from tire_pressure_unit.
         _pu_raw = get_child_value(state, "Chassis.Axle.Tire.PressureUnit")
-        if _pu_raw is None:
-            vehicle.tire_pressure_unit = None
-        else:
-            try:
-                vehicle.tire_pressure_unit = PressureUnit(_pu_raw)
-            except ValueError:
-                # PressureUnit outside {0:psi,1:kpa,2:bar}; e.g. 3 on
-                # indirect-TPMS vehicles (no direct sensor, kia_uvo #1786) ->
-                # the car reports no per-tire pressure, so unavailable is
-                # correct. Expected on some vehicles, so debug, not warning.
-                _LOGGER.debug(
-                    "%s - Tire PressureUnit %r not in {0:psi,1:kpa,2:bar}; "
-                    "tire pressure values ignored",
-                    DOMAIN,
-                    _pu_raw,
-                )
-                vehicle.tire_pressure_unit = None
+        vehicle.tire_pressure_unit = None
+        if (
+            not isinstance(_pu_raw, bool)
+            and isinstance(_pu_raw, (int, float))
+            and _pu_raw in (0, 1, 2)
+        ):
+            vehicle.tire_pressure_unit = PressureUnit(int(_pu_raw))
+        elif _pu_raw is not None:
+            # Unknown units are unavailable, without rejecting core status.
+            _LOGGER.debug("%s - Tire pressure unit is unavailable", DOMAIN)
         _scale = (
             PRESSURE_SCALES.get(vehicle.tire_pressure_unit)
             if vehicle.tire_pressure_unit is not None
@@ -691,28 +708,44 @@ class JapanTelemetry:
         # driving) -> pressure_or_none returns None so the entity shows
         # unavailable instead of an impossible value. See kia_uvo #1783, #1232.
         _pfl = pressure_or_none(
-            get_child_value(state, "Chassis.Axle.Row1.Left.Tire.Pressure")
+            _number_or_none(
+                get_child_value(state, "Chassis.Axle.Row1.Left.Tire.Pressure")
+            )
         )
         _pfr = pressure_or_none(
-            get_child_value(state, "Chassis.Axle.Row1.Right.Tire.Pressure")
+            _number_or_none(
+                get_child_value(state, "Chassis.Axle.Row1.Right.Tire.Pressure")
+            )
         )
         _prl = pressure_or_none(
-            get_child_value(state, "Chassis.Axle.Row2.Left.Tire.Pressure")
+            _number_or_none(
+                get_child_value(state, "Chassis.Axle.Row2.Left.Tire.Pressure")
+            )
         )
         _prr = pressure_or_none(
-            get_child_value(state, "Chassis.Axle.Row2.Right.Tire.Pressure")
+            _number_or_none(
+                get_child_value(state, "Chassis.Axle.Row2.Right.Tire.Pressure")
+            )
         )
         vehicle.tire_pressure_front_left = (
-            round(_pfl * _scale, 1) if _pfl is not None and _scale is not None else None
+            _number_or_none(round(_pfl * _scale, 1))
+            if _pfl is not None and _pfl >= 0 and _scale is not None
+            else None
         )
         vehicle.tire_pressure_front_right = (
-            round(_pfr * _scale, 1) if _pfr is not None and _scale is not None else None
+            _number_or_none(round(_pfr * _scale, 1))
+            if _pfr is not None and _pfr >= 0 and _scale is not None
+            else None
         )
         vehicle.tire_pressure_rear_left = (
-            round(_prl * _scale, 1) if _prl is not None and _scale is not None else None
+            _number_or_none(round(_prl * _scale, 1))
+            if _prl is not None and _prl >= 0 and _scale is not None
+            else None
         )
         vehicle.tire_pressure_rear_right = (
-            round(_prr * _scale, 1) if _prr is not None and _scale is not None else None
+            _number_or_none(round(_prr * _scale, 1))
+            if _prr is not None and _prr >= 0 and _scale is not None
+            else None
         )
 
     def _parse_ccs2_power_and_alerts(
@@ -764,17 +797,23 @@ class JapanTelemetry:
             vehicle.ev_battery_heating_state = bool(battery_heating_state)
 
         vehicle.ev_battery_water_temperature = (
-            get_child_value(
-                state, "Green.BatteryManagement.Temperature.CoolingWaterInlet"
+            _number_or_none(
+                get_child_value(
+                    state, "Green.BatteryManagement.Temperature.CoolingWaterInlet"
+                )
             ),
             TEMPERATURE_UNITS[0],
         )
         vehicle.ev_battery_temperature_min = (
-            get_child_value(state, "Green.BatteryManagement.Temperature.Min.Raw"),
+            _number_or_none(
+                get_child_value(state, "Green.BatteryManagement.Temperature.Min.Raw")
+            ),
             TEMPERATURE_UNITS[0],
         )
         vehicle.ev_battery_temperature_max = (
-            get_child_value(state, "Green.BatteryManagement.Temperature.Max.Raw"),
+            _number_or_none(
+                get_child_value(state, "Green.BatteryManagement.Temperature.Max.Raw")
+            ),
             TEMPERATURE_UNITS[0],
         )
 
@@ -1050,6 +1089,8 @@ class JapanTelemetry:
         climate2 = get_child_value(
             state, "Green.Reservation.Departure.Schedule2.Climate"
         )
+        climate1 = climate1 if isinstance(climate1, dict) else {}
+        climate2 = climate2 if isinstance(climate2, dict) else {}
         default_temp_unit = (
             climate1.get("TemperatureUnit", 0)
             if climate1 and climate1.get("TemperatureUnit") is not None
@@ -1059,7 +1100,7 @@ class JapanTelemetry:
         def _parse_departure_climate(
             climate: dict[str, Any],
             schedule_activation: object = None,
-        ) -> tuple[bool | None, bool | None, tuple[float, str | None] | None]:
+        ) -> tuple[bool | None, bool | None, tuple[float | None, str | None]]:
             activation = (
                 schedule_activation
                 if schedule_activation is not None
@@ -1068,19 +1109,19 @@ class JapanTelemetry:
             enabled = bool(activation) if activation is not None else None
             defrost_val = climate.get("Defrost")
             defrost = bool(defrost_val) if defrost_val is not None else None
-            temp: tuple[float, str | None] | None = None
-            temp_val = climate.get("Temperature")
-            if temp_val is not None:
-                try:
-                    temp_float = float(temp_val)
-                    unit_int = climate.get("TemperatureUnit")
-                    if unit_int is None:
-                        unit_int = default_temp_unit
-                    unit_str = TEMPERATURE_UNITS.get(unit_int, TEMPERATURE_UNITS[0])
-                    temp = (temp_float, unit_str)
-                except ValueError, TypeError:
-                    pass
-            return enabled, defrost, temp
+            unit_int = climate.get("TemperatureUnit")
+            if unit_int is None:
+                unit_int = default_temp_unit
+            unit_str = _temperature_unit(unit_int)
+            temperature = _number_or_none(climate.get("Temperature"))
+            return (
+                enabled,
+                defrost,
+                (
+                    temperature if unit_str is not None else None,
+                    unit_str,
+                ),
+            )
 
         if climate1:
             enabled, defrost, temp = _parse_departure_climate(climate1)

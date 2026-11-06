@@ -169,3 +169,241 @@ def test_mqtt_delta_retains_flags_absent_from_the_observation(reader):
     assert vehicle.data["Body"] == baseline["Body"]
     assert vehicle.engine_is_running is False
     assert vehicle.last_updated_at.microsecond == 200000
+
+
+TEMPERATURE_FIELDS = (
+    ("Cabin.HVAC.Row1.Driver.Temperature.Value", "air_temperature"),
+    ("Cabin.HVAC.OutsideTemperature.Value", "outside_temperature"),
+    (
+        "Green.BatteryManagement.Temperature.CoolingWaterInlet",
+        "ev_battery_water_temperature",
+    ),
+    ("Green.BatteryManagement.Temperature.Min.Raw", "ev_battery_temperature_min"),
+    ("Green.BatteryManagement.Temperature.Max.Raw", "ev_battery_temperature_max"),
+    (
+        "Green.Reservation.Departure.Schedule1.Climate.Temperature",
+        "ev_first_departure_climate_temperature",
+    ),
+    (
+        "Green.Reservation.Departure.Schedule2.Climate.Temperature",
+        "ev_second_departure_climate_temperature",
+    ),
+)
+
+
+def put(state, path, value):
+    for part in path.split(".")[:-1]:
+        state = state.setdefault(part, {})
+    state[path.rsplit(".", 1)[-1]] = value
+
+
+def temperature_state(path, value, date="20261106010000.100", unit=0):
+    state = ccs2_state(date)
+    put(state, path, value)
+    if path.endswith(".Value"):
+        put(state, path.removesuffix("Value") + "Unit", unit)
+    elif path.endswith("Climate.Temperature"):
+        put(state, path + "Unit", unit)
+    return state
+
+
+INVALID_NUMBERS = [
+    None,
+    True,
+    False,
+    "NaN",
+    float("inf"),
+    -float("inf"),
+    10**1000,
+    [],
+    {},
+    "bad",
+]
+INVALID_NUMBER_IDS = [
+    "missing",
+    "true",
+    "false",
+    "nan",
+    "inf",
+    "negative-inf",
+    "overflow",
+    "list",
+    "dict",
+    "text",
+]
+
+
+@pytest.mark.parametrize("path,attribute", TEMPERATURE_FIELDS)
+@pytest.mark.parametrize("value", INVALID_NUMBERS, ids=INVALID_NUMBER_IDS)
+def test_invalid_optional_temperature_does_not_discard_new_core_status(
+    reader, path, attribute, value
+):
+    _, read = reader
+    vehicle = Vehicle(id="synthetic", ccu_ccs2_protocol_support=1)
+    read(vehicle, temperature_state(path, 20))
+    assert getattr(vehicle, attribute) == 20
+    read(vehicle, temperature_state(path, value, "20261106010000.200"))
+    assert getattr(vehicle, attribute) is None
+    assert vehicle.is_locked is True
+    assert vehicle.total_driving_range == 200
+    assert vehicle.last_updated_at == dt.datetime(
+        2026, 11, 6, 1, 0, 0, 200000, tzinfo=dt.UTC
+    )
+
+
+@pytest.mark.parametrize("path,attribute", TEMPERATURE_FIELDS)
+@pytest.mark.parametrize("value", [0, -5, "0", "21.5"])
+def test_valid_optional_temperature_numbers_preserve_zero_and_numeric_strings(
+    reader, path, attribute, value
+):
+    _, read = reader
+    vehicle = Vehicle(id="synthetic", ccu_ccs2_protocol_support=1)
+    read(vehicle, temperature_state(path, value))
+    assert getattr(vehicle, attribute) == float(value)
+    assert vehicle.is_locked is True
+
+
+@pytest.mark.parametrize(
+    "path,attribute",
+    [TEMPERATURE_FIELDS[0], TEMPERATURE_FIELDS[1], *TEMPERATURE_FIELDS[-2:]],
+)
+@pytest.mark.parametrize("unit", [2, True, "0", {}, [], float("nan")])
+def test_unknown_or_malformed_optional_temperature_unit_is_local_to_reading(
+    reader, path, attribute, unit
+):
+    _, read = reader
+    vehicle = Vehicle(id="synthetic", ccu_ccs2_protocol_support=1)
+    read(vehicle, temperature_state(path, 20))
+    read(vehicle, temperature_state(path, 21, "20261106010000.200", unit))
+    assert getattr(vehicle, attribute) is None
+    assert vehicle.is_locked is True
+    assert vehicle.last_updated_at.microsecond == 200000
+
+
+def test_off_retains_target_and_mqtt_delta_retains_unrelated_valid_temperatures(reader):
+    api, read = reader
+    vehicle = Vehicle(id="synthetic", ccu_ccs2_protocol_support=1)
+    state = temperature_state(TEMPERATURE_FIELDS[0][0], 22)
+    put(state, "Cabin.HVAC.OutsideTemperature", {"Value": 0, "Unit": 0})
+    read(vehicle, state)
+    off = copy.deepcopy(state)
+    off["Date"] = "20261106010000.200"
+    put(off, TEMPERATURE_FIELDS[0][0], "OFF")
+    read(vehicle, off)
+    assert vehicle.air_temperature == 22
+    assert vehicle.outside_temperature == 0
+    session = Mock()
+    session.drain_state_updates.return_value = [
+        {"Date": "20261106010000.300", "DrivingReady": False}
+    ]
+    api._mqtt_sessions[vehicle.id] = ((), session)
+    assert api.apply_cached_mqtt_state(vehicle)
+    assert vehicle.air_temperature == 22
+    assert vehicle.outside_temperature == 0
+    assert vehicle.engine_is_running is False
+
+
+@pytest.mark.parametrize("unit,expected", [(0, "°C"), (1, "°F")])
+def test_reported_valid_temperature_units_and_default_departure_fallback_survive(
+    reader, unit, expected
+):
+    _, read = reader
+    vehicle = Vehicle(id="synthetic", ccu_ccs2_protocol_support=1)
+    state = temperature_state(TEMPERATURE_FIELDS[0][0], 0, unit=unit)
+    put(state, "Cabin.HVAC.OutsideTemperature", {"Value": 0, "Unit": unit})
+    put(
+        state,
+        "Green.Reservation.Departure.Schedule1.Climate",
+        {"Temperature": 0, "TemperatureUnit": unit},
+    )
+    put(state, "Green.Reservation.Departure.Schedule2.Climate", {"Temperature": 0})
+    read(vehicle, state)
+    assert vehicle.air_temperature == 0
+    assert vehicle._air_temperature_unit == expected
+    assert vehicle.outside_temperature == 0
+    assert vehicle._outside_temperature_unit == expected
+    assert vehicle.ev_first_departure_climate_temperature == 0
+    assert vehicle.ev_first_departure_climate_temperature_unit == expected
+    assert vehicle.ev_second_departure_climate_temperature == 0
+    assert vehicle.ev_second_departure_climate_temperature_unit == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    [*INVALID_NUMBERS, -1, 255],
+    ids=[*INVALID_NUMBER_IDS, "negative", "sentinel"],
+)
+def test_malformed_optional_tire_pressure_does_not_discard_core_status(reader, value):
+    _, read = reader
+    vehicle = Vehicle(id="synthetic", ccu_ccs2_protocol_support=1)
+    state = ccs2_state()
+    put(state, "Chassis.Axle.Tire.PressureUnit", 2)
+    put(state, "Chassis.Axle.Row1.Left.Tire.Pressure", 27)
+    read(vehicle, state)
+    assert vehicle.tire_pressure_front_left == 2.7
+    state["Date"] = "20261106010000.200"
+    put(state, "Chassis.Axle.Row1.Left.Tire.Pressure", value)
+    put(state, "Chassis.Axle.Row1.Right.Tire.Pressure", 0)
+    read(vehicle, state)
+    assert vehicle.tire_pressure_front_left is None
+    assert vehicle.tire_pressure_front_right == 0
+    assert vehicle.is_locked is True
+    assert vehicle.last_updated_at.microsecond == 200000
+
+
+@pytest.mark.parametrize("unit", [None, 3, True, "0", {}, [], float("nan")])
+def test_malformed_optional_tire_unit_does_not_discard_core_status(reader, unit):
+    _, read = reader
+    vehicle = Vehicle(id="synthetic", ccu_ccs2_protocol_support=1)
+    state = ccs2_state()
+    put(state, "Chassis.Axle.Tire.PressureUnit", unit)
+    put(state, "Chassis.Axle.Row1.Left.Tire.Pressure", 27)
+    read(vehicle, state)
+    assert vehicle.tire_pressure_front_left is None
+    assert vehicle.tire_pressure_unit is None
+    assert vehicle.is_locked is True
+
+
+def test_off_sentinel_is_not_interpreted_as_an_on_or_supported_warning(reader):
+    _, read = reader
+    vehicle = Vehicle(id="synthetic", ccu_ccs2_protocol_support=1)
+    read(vehicle, ccs2_flags(ccs2_state(), 2))
+    for attribute in FLAGS[:4]:
+        assert getattr(vehicle, attribute) is False
+    for attribute in FLAGS[4:]:
+        assert getattr(vehicle, attribute) is None
+
+
+def test_malformed_temperature_delta_still_publishes_valid_core_observation(reader):
+    api, read = reader
+    vehicle = Vehicle(id="synthetic", ccu_ccs2_protocol_support=1)
+    state = temperature_state(TEMPERATURE_FIELDS[0][0], 22)
+    put(state, "Cabin.HVAC.OutsideTemperature", {"Value": 0, "Unit": 0})
+    read(vehicle, state)
+    session = Mock()
+    session.drain_state_updates.return_value = [
+        {
+            "Date": "20261106010000.200",
+            "DrivingReady": False,
+            "Cabin": {"HVAC": {"OutsideTemperature": {"Value": "NaN", "Unit": []}}},
+        }
+    ]
+    api._mqtt_sessions[vehicle.id] = ((), session)
+    assert api.apply_cached_mqtt_state(vehicle)
+    assert vehicle.air_temperature == 22
+    assert vehicle.outside_temperature is None
+    assert vehicle.is_locked is True
+    assert vehicle.engine_is_running is False
+    assert vehicle.last_updated_at.microsecond == 200000
+
+
+def test_pressure_scaling_overflow_becomes_unknown_without_discarding_status(reader):
+    _, read = reader
+    vehicle = Vehicle(id="synthetic", ccu_ccs2_protocol_support=1)
+    state = ccs2_state()
+    put(state, "Chassis.Axle.Tire.PressureUnit", 1)
+    put(state, "Chassis.Axle.Row1.Left.Tire.Pressure", 1e308)
+    read(vehicle, state)
+    assert vehicle.tire_pressure_front_left is None
+    assert vehicle.is_locked is True
+    assert vehicle.total_driving_range == 200
