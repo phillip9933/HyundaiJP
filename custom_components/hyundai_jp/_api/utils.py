@@ -192,13 +192,6 @@ def normalize_battery_soh(value: Any) -> Any:
     return value
 
 
-def get_hex_temp_into_index(value: str | None) -> int | None:
-    if value is not None:
-        return int(value.replace("H", ""), 16)
-    else:
-        return None
-
-
 def parse_datetime(
     value: str | None, timezone: datetime.tzinfo | None
 ) -> datetime.datetime | None:

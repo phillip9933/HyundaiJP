@@ -66,16 +66,6 @@ SEAT_STATUS = {
     8: "High Heat",
 }
 
-HEAT_STATUS = {
-    None: None,
-    0: "Off",
-    1: "Steering Wheel and Rear Window",
-    2: "Rear Window",
-    3: "Steering Wheel",
-    # Seems to be the same as 1 but different region (EU):
-    4: "Steering Wheel and Rear Window",
-}
-
 
 class ENGINE_TYPES(Enum):
     ICE = "ICE"
