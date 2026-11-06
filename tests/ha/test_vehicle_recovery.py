@@ -6,7 +6,6 @@ from unittest.mock import Mock
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import UpdateFailed
 import pytest
 
@@ -145,13 +144,12 @@ async def test_command_cached_reads_recover_successes_and_retain_unread_cars(rec
 
     manager.update_vehicle_with_cached_state.reset_mock(side_effect=True)
     manager.update_vehicle_with_cached_state.side_effect = read
-    with pytest.raises(HomeAssistantError, match="service accepted the request"):
-        await owner._async_refresh_command_state(ORDER_STATUS.ACCEPTED)
+    await owner._async_refresh_command_state("a", ORDER_STATUS.ACCEPTED)
     assert [
         call.args for call in manager.update_vehicle_with_cached_state.call_args_list
-    ] == [("a",), ("b",)]
+    ] == [("a",)]
     assert owner._failed_vehicles == {"b", "c"}
-    assert owner._vehicle_failures == {"b": 2, "c": 1}
+    assert owner._vehicle_failures == {"b": 1, "c": 1}
     assert owner.vehicle_available("a") is True
     manager.force_refresh_vehicle_state.assert_not_called()
 
@@ -203,7 +201,7 @@ async def test_vehicle_recovery_never_clears_an_account_error_or_retry_schedule(
     elif path == "passive":
         await _watch_once(recovery, changed=True)
     else:
-        await owner._async_refresh_command_state(ORDER_STATUS.ACCEPTED)
+        await owner._async_refresh_command_state("a", ORDER_STATUS.ACCEPTED)
     owner.async_set_updated_data.assert_not_called()
     assert owner.last_update_success is False
     assert owner.last_exception is account_error

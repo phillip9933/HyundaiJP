@@ -912,13 +912,14 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[None]):
             error.request_rejected = status == ORDER_STATUS.FAILED
             raise error
 
-    async def _async_refresh_command_state(self, status: ORDER_STATUS | None) -> None:
-        """Read cached state separately from service acceptance or execution."""
+    async def _async_refresh_command_state(
+        self, vehicle_id: str, status: ORDER_STATUS | None
+    ) -> None:
+        """Read only the commanded car, independently of its service receipt."""
         try:
-            for vehicle_id in list(self.vehicle_manager.vehicles):
-                await self._async_read_vehicle_state(
-                    vehicle_id, self.vehicle_manager.update_vehicle_with_cached_state
-                )
+            await self._async_read_vehicle_state(
+                vehicle_id, self.vehicle_manager.update_vehicle_with_cached_state
+            )
         except Exception as err:
             if status in (ORDER_STATUS.SUCCESS, ORDER_STATUS.ACCEPTED):
                 message = (
@@ -946,7 +947,7 @@ class JapanDataUpdateCoordinator(DataUpdateCoordinator[None]):
             self._check_command_confirmation(status)
         finally:
             try:
-                await self._async_refresh_command_state(status)
+                await self._async_refresh_command_state(vehicle_id, status)
             finally:
                 if (
                     status == ORDER_STATUS.ACCEPTED

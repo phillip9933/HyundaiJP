@@ -53,7 +53,7 @@ async def test_delayed_passive_state_reaches_lock_and_ha_activity_event():
         return fn(*args)
 
     result.hass.async_add_executor_job = AsyncMock(side_effect=executor)
-    await result._async_refresh_command_state(ORDER_STATUS.ACCEPTED)
+    await result._async_refresh_command_state(vehicle.id, ORDER_STATUS.ACCEPTED)
     assert lock.is_locked is True
     assert states.get("lock.synthetic_car").state == "locked"
     assert [call.args[0] for call in bus.async_fire_internal.call_args_list] == [
@@ -63,7 +63,7 @@ async def test_delayed_passive_state_reaches_lock_and_ha_activity_event():
     # The delayed response represents new cached telemetry, not a second command.
     latest_locked[0] = False
     bus.reset_mock()
-    await result._async_refresh_command_state(ORDER_STATUS.ACCEPTED)
+    await result._async_refresh_command_state(vehicle.id, ORDER_STATUS.ACCEPTED)
     assert lock.is_locked is False
     event = bus.async_fire_internal.call_args
     assert event.args[0] == EVENT_STATE_CHANGED
