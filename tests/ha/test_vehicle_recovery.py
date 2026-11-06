@@ -10,6 +10,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import UpdateFailed
 import pytest
 
+from custom_components.hyundai_jp import button
 from custom_components.hyundai_jp._api import Vehicle
 from custom_components.hyundai_jp._api.const import ORDER_STATUS
 from custom_components.hyundai_jp._api.exceptions import (
@@ -262,3 +263,29 @@ async def test_poll_abort_retains_unread_failures_and_successful_progress(recove
     assert [
         call.args for call in manager.update_vehicle_with_cached_state.call_args_list
     ] == [("a",), ("b",)]
+
+
+async def test_force_refresh_button_can_recover_a_failed_car_on_healthy_account(
+    recovery,
+):
+    owner = recovery.owner
+    await _fail_initial_poll(recovery)
+    vehicle = recovery.vehicles["a"]
+    refresh_description = next(
+        item for item in button.BUTTON_DESCRIPTIONS if item.key == "force_refresh"
+    )
+    refresh = button.HyundaiBluelinkButton(owner, refresh_description, vehicle)
+    command_description = next(
+        item for item in button.BUTTON_DESCRIPTIONS if item.key == "charge_port_toggle"
+    )
+    command = button.HyundaiBluelinkButton(owner, command_description, vehicle)
+    assert refresh.available is True
+    assert command.available is False
+    await refresh.async_press()
+    assert refresh.available is True
+    assert command.available is True
+    assert owner._failed_vehicles == {"b", "c"}
+    recovery.manager.force_refresh_vehicle_state.assert_called_once_with("a")
+    owner.last_update_success = False
+    assert refresh.available is False
+    assert command.available is False

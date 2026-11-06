@@ -153,6 +153,13 @@ class HyundaiBluelinkButton(ButtonEntity, HyundaiBluelinkEntity):
         self._attr_entity_registry_enabled_default = description.enabled_fn(vehicle)
 
     @property
+    def available(self) -> bool:
+        """Keep a healthy account's recovery action usable after a car poll fails."""
+        if self._key == "force_refresh":
+            return self.coordinator.last_update_success
+        return super().available
+
+    @property
     def icon(self) -> str | None:
         """Use current vehicle state for buttons with a stateful icon."""
         icon_fn = self.entity_description.icon_fn
