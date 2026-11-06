@@ -124,12 +124,15 @@ adapter.
 
 Each account stores its typed coordinator in `ConfigEntry.runtime_data`.
 Services register once and route only to loaded accounts. The coordinator owns
-polling, command serialization and shutdown. `svm_cache.py`
-keeps camera captures and rendered views locally, using the coordinator’s tracked
+polling, command serialization and shutdown. Post-command cached reads target
+the affected vehicle; explicit account updates still read all vehicles.
+`svm_cache.py` keeps camera captures and rendered views locally, using the coordinator’s tracked
 executor. In the bundled API, `client.py` connects the authentication, commands,
 SVM and telemetry components. `authentication.py` handles login and HTTP response
 envelopes, `http.py` owns the bounded HTTP session, `options.py` holds request
-models, and `telemetry.py` parses both Japan status formats.
+models, and `telemetry.py` parses both Japan status formats in ordered sections.
+Public services use validated schemas and explicit typed dispatch; climate,
+schedule and navigation request builders are separate from account routing.
 
 For local development, use Python 3.14.8 and run
 `python scripts/install_dependencies.py` in a virtual environment. This installs
