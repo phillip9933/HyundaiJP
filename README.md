@@ -66,6 +66,12 @@ the last available values while valid core vehicle status continues to update.
 Reauthentication and reconfiguration keep the same account; add a separate
 integration entry to use a different account.
 
+Missing optional readings stay unknown, and malformed temperature or pressure
+readings do not discard valid core vehicle status. A successful status read
+restores the affected vehicle after an earlier poll failure. Force Refresh
+remains usable for that recovery while the account connection is healthy.
+Charging sliders reject unsupported values before sending a command.
+
 ### Charge port and command progress
 
 Use the **Charge Port** button for a single action: open when the last reported
