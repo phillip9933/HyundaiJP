@@ -1,9 +1,10 @@
 """Services for Hyundai Bluelink JP integration."""
 
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import time
+from functools import partial
 import logging
-from typing import Any, cast
+from typing import Any, Final, cast
 
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import ATTR_DEVICE_ID
@@ -202,161 +203,180 @@ def _navigation_pois(data: Mapping[str, Any]) -> list[POIInfo]:
     return [poi]
 
 
+type _AccountAction = Callable[[JapanDataUpdateCoordinator], Awaitable[None]]
+type _VehicleAction = Callable[[JapanDataUpdateCoordinator, str], Awaitable[None]]
+type _ServiceHandler = Callable[[HomeAssistant, ServiceCall], Awaitable[None]]
+
+
+async def _async_handle_start_climate(hass: HomeAssistant, call: ServiceCall) -> None:
+    coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
+    await coordinator.async_start_climate(vehicle_id, _climate_options(call.data))
+
+
+async def _async_handle_set_charge_limit(
+    hass: HomeAssistant, call: ServiceCall
+) -> None:
+    coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
+    ac = call.data.get("ac_limit")
+    dc = call.data.get("dc_limit")
+
+    if ac is not None and dc is not None:
+        await coordinator.async_set_charge_limits(vehicle_id, int(ac), int(dc))
+    else:
+        raise HomeAssistantError("Both AC and DC charging limits are required")
+
+
+async def _async_handle_set_charging_current(
+    hass: HomeAssistant, call: ServiceCall
+) -> None:
+    coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
+    current_level = call.data.get("level")
+
+    if current_level is not None:
+        await coordinator.async_set_charging_current(vehicle_id, int(current_level))
+    else:
+        raise HomeAssistantError("Charging current level is required")
+
+
+async def _async_handle_schedule_charging_and_climate(
+    hass: HomeAssistant, call: ServiceCall
+) -> None:
+    coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
+    await coordinator.async_schedule_charging_and_climate(
+        vehicle_id, _schedule_options(call.data)
+    )
+
+
+async def _async_handle_set_windows(hass: HomeAssistant, call: ServiceCall) -> None:
+    coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
+    window_options = WindowRequestOptions(
+        front_left=call.data.get("flwindow"),
+        front_right=call.data.get("frwindow"),
+        back_left=call.data.get("rlwindow"),
+        back_right=call.data.get("rrwindow"),
+    )
+
+    if any(value is not None for value in vars(window_options).values()):
+        await coordinator.async_set_windows(vehicle_id, window_options)
+    else:
+        raise HomeAssistantError("Provide at least one window setting")
+
+
+async def _async_handle_set_navigation(hass: HomeAssistant, call: ServiceCall) -> None:
+    coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
+    await coordinator.async_set_navigation(vehicle_id, _navigation_pois(call.data))
+
+
+async def _async_handle_set_off_peak_charging(
+    hass: HomeAssistant, call: ServiceCall
+) -> None:
+    coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
+    mode = call.data.get("mode")
+    off_peak_start_time = call.data.get("off_peak_start_time")
+    off_peak_end_time = call.data.get("off_peak_end_time")
+    if off_peak_start_time is not None:
+        off_peak_start_time = time.fromisoformat(off_peak_start_time)
+    if off_peak_end_time is not None:
+        off_peak_end_time = time.fromisoformat(off_peak_end_time)
+    await coordinator.async_set_off_peak_charging(
+        vehicle_id,
+        mode=OffPeakChargingMode(mode) if mode is not None else None,
+        start=off_peak_start_time,
+        end=off_peak_end_time,
+    )
+
+
+async def _async_handle_capture_svm_image(
+    hass: HomeAssistant, call: ServiceCall
+) -> None:
+    coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
+
+    if not await coordinator.async_supports_svm(vehicle_id):
+        raise HomeAssistantError("SVM is not available for this vehicle.")
+
+    await coordinator.async_request_svm_capture(vehicle_id)
+
+
+_ACCOUNT_ACTIONS: Final[dict[str, _AccountAction]] = {
+    SERVICE_FORCE_UPDATE: lambda coordinator: coordinator.async_force_update_all(),
+    SERVICE_UPDATE: lambda coordinator: coordinator.async_update_all(),
+}
+
+
+_VEHICLE_ACTIONS: Final[dict[str, _VehicleAction]] = {
+    SERVICE_STOP_CLIMATE: lambda coordinator, vehicle_id: (
+        coordinator.async_stop_climate(vehicle_id)
+    ),
+    SERVICE_LOCK: lambda coordinator, vehicle_id: coordinator.async_lock_vehicle(
+        vehicle_id
+    ),
+    SERVICE_UNLOCK: lambda coordinator, vehicle_id: coordinator.async_unlock_vehicle(
+        vehicle_id
+    ),
+    SERVICE_START_CHARGE: lambda coordinator, vehicle_id: (
+        coordinator.async_start_charge(vehicle_id)
+    ),
+    SERVICE_STOP_CHARGE: lambda coordinator, vehicle_id: coordinator.async_stop_charge(
+        vehicle_id
+    ),
+    SERVICE_OPEN_CHARGE_PORT: lambda coordinator, vehicle_id: (
+        coordinator.async_open_charge_port(vehicle_id)
+    ),
+    SERVICE_CLOSE_CHARGE_PORT: lambda coordinator, vehicle_id: (
+        coordinator.async_close_charge_port(vehicle_id)
+    ),
+    SERVICE_START_HAZARD_LIGHTS: lambda coordinator, vehicle_id: (
+        coordinator.async_start_hazard_lights(vehicle_id)
+    ),
+    SERVICE_START_HAZARD_LIGHTS_AND_HORN: lambda coordinator, vehicle_id: (
+        coordinator.async_start_hazard_lights_and_horn(vehicle_id)
+    ),
+    SERVICE_START_VALET_MODE: lambda coordinator, vehicle_id: (
+        coordinator.async_start_valet_mode(vehicle_id)
+    ),
+    SERVICE_STOP_VALET_MODE: lambda coordinator, vehicle_id: (
+        coordinator.async_stop_valet_mode(vehicle_id)
+    ),
+}
+
+
+_SERVICE_HANDLERS: Final[dict[str, _ServiceHandler]] = {
+    SERVICE_START_CLIMATE: _async_handle_start_climate,
+    SERVICE_SET_CHARGE_LIMIT: _async_handle_set_charge_limit,
+    SERVICE_SET_CHARGING_CURRENT: _async_handle_set_charging_current,
+    SERVICE_SCHEDULE_CHARGING_AND_CLIMATE: _async_handle_schedule_charging_and_climate,
+    SERVICE_SET_WINDOWS: _async_handle_set_windows,
+    SERVICE_SET_NAVIGATION: _async_handle_set_navigation,
+    SERVICE_SET_OFF_PEAK_CHARGING: _async_handle_set_off_peak_charging,
+    SERVICE_CAPTURE_SVM_IMAGE: _async_handle_capture_svm_image,
+}
+
+
+async def _async_handle_service(
+    hass: HomeAssistant, service: str, call: ServiceCall
+) -> None:
+    """Resolve the target once and await its explicitly registered action."""
+    if account_action := _ACCOUNT_ACTIONS.get(service):
+        if service == SERVICE_UPDATE:
+            _LOGGER.debug("Cached vehicle update requested")
+        await account_action(_resolve_account_target(hass, call))
+        return
+    if vehicle_action := _VEHICLE_ACTIONS.get(service):
+        coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
+        await vehicle_action(coordinator, vehicle_id)
+        return
+    await _SERVICE_HANDLERS[service](hass, call)
+
+
 @callback
 def async_setup_services(hass: HomeAssistant) -> bool:
-    """Set up services for Hyundai Bluelink JP."""
-
-    async def async_handle_force_update(call: ServiceCall) -> None:
-        coordinator = _resolve_account_target(hass, call)
-        await coordinator.async_force_update_all()
-
-    async def async_handle_update(call: ServiceCall) -> None:
-        _LOGGER.debug("Cached vehicle update requested")
-        coordinator = _resolve_account_target(hass, call)
-        await coordinator.async_update_all()
-
-    async def async_handle_start_climate(call: ServiceCall) -> None:
-        coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
-        await coordinator.async_start_climate(vehicle_id, _climate_options(call.data))
-
-    async def async_handle_stop_climate(call: ServiceCall) -> None:
-        coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
-        await coordinator.async_stop_climate(vehicle_id)
-
-    async def async_handle_lock(call: ServiceCall) -> None:
-        coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
-        await coordinator.async_lock_vehicle(vehicle_id)
-
-    async def async_handle_unlock(call: ServiceCall) -> None:
-        coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
-        await coordinator.async_unlock_vehicle(vehicle_id)
-
-    async def async_handle_open_charge_port(call: ServiceCall) -> None:
-        coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
-        await coordinator.async_open_charge_port(vehicle_id)
-
-    async def async_handle_close_charge_port(call: ServiceCall) -> None:
-        coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
-        await coordinator.async_close_charge_port(vehicle_id)
-
-    async def async_handle_start_charge(call: ServiceCall) -> None:
-        coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
-        await coordinator.async_start_charge(vehicle_id)
-
-    async def async_handle_stop_charge(call: ServiceCall) -> None:
-        coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
-        await coordinator.async_stop_charge(vehicle_id)
-
-    async def async_handle_set_charge_limit(call: ServiceCall) -> None:
-        coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
-        ac = call.data.get("ac_limit")
-        dc = call.data.get("dc_limit")
-
-        if ac is not None and dc is not None:
-            await coordinator.async_set_charge_limits(vehicle_id, int(ac), int(dc))
-        else:
-            raise HomeAssistantError("Both AC and DC charging limits are required")
-
-    async def async_handle_set_windows(call: ServiceCall) -> None:
-        coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
-        window_options = WindowRequestOptions(
-            front_left=call.data.get("flwindow"),
-            front_right=call.data.get("frwindow"),
-            back_left=call.data.get("rlwindow"),
-            back_right=call.data.get("rrwindow"),
-        )
-
-        if any(value is not None for value in vars(window_options).values()):
-            await coordinator.async_set_windows(vehicle_id, window_options)
-        else:
-            raise HomeAssistantError("Provide at least one window setting")
-
-    async def async_handle_set_charging_current(call: ServiceCall) -> None:
-        coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
-        current_level = call.data.get("level")
-
-        if current_level is not None:
-            await coordinator.async_set_charging_current(vehicle_id, int(current_level))
-        else:
-            raise HomeAssistantError("Charging current level is required")
-
-    async def async_handle_schedule_charging_and_climate(call: ServiceCall) -> None:
-        coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
-        await coordinator.async_schedule_charging_and_climate(
-            vehicle_id, _schedule_options(call.data)
-        )
-
-    async def async_handle_set_off_peak_charging(call: ServiceCall) -> None:
-        coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
-        mode = call.data.get("mode")
-        off_peak_start_time = call.data.get("off_peak_start_time")
-        off_peak_end_time = call.data.get("off_peak_end_time")
-        if off_peak_start_time is not None:
-            off_peak_start_time = time.fromisoformat(off_peak_start_time)
-        if off_peak_end_time is not None:
-            off_peak_end_time = time.fromisoformat(off_peak_end_time)
-        await coordinator.async_set_off_peak_charging(
-            vehicle_id,
-            mode=OffPeakChargingMode(mode) if mode is not None else None,
-            start=off_peak_start_time,
-            end=off_peak_end_time,
-        )
-
-    async def async_handle_start_hazard_lights(call: ServiceCall) -> None:
-        coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
-        await coordinator.async_start_hazard_lights(vehicle_id)
-
-    async def async_handle_start_hazard_lights_and_horn(call: ServiceCall) -> None:
-        coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
-        await coordinator.async_start_hazard_lights_and_horn(vehicle_id)
-
-    async def async_handle_start_valet_mode(call: ServiceCall) -> None:
-        coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
-        await coordinator.async_start_valet_mode(vehicle_id)
-
-    async def async_handle_stop_valet_mode(call: ServiceCall) -> None:
-        coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
-        await coordinator.async_stop_valet_mode(vehicle_id)
-
-    async def async_handle_set_navigation(call: ServiceCall) -> None:
-        coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
-        await coordinator.async_set_navigation(vehicle_id, _navigation_pois(call.data))
-
-    async def async_handle_capture_svm_image(call: ServiceCall) -> None:
-        coordinator, vehicle_id = _resolve_vehicle_target(hass, call)
-
-        if not await coordinator.async_supports_svm(vehicle_id):
-            raise HomeAssistantError("SVM is not available for this vehicle.")
-
-        await coordinator.async_request_svm_capture(vehicle_id)
-
-    services = {
-        SERVICE_FORCE_UPDATE: async_handle_force_update,
-        SERVICE_UPDATE: async_handle_update,
-        SERVICE_START_CLIMATE: async_handle_start_climate,
-        SERVICE_STOP_CLIMATE: async_handle_stop_climate,
-        SERVICE_LOCK: async_handle_lock,
-        SERVICE_UNLOCK: async_handle_unlock,
-        SERVICE_START_CHARGE: async_handle_start_charge,
-        SERVICE_STOP_CHARGE: async_handle_stop_charge,
-        SERVICE_SET_CHARGE_LIMIT: async_handle_set_charge_limit,
-        SERVICE_OPEN_CHARGE_PORT: async_handle_open_charge_port,
-        SERVICE_CLOSE_CHARGE_PORT: async_handle_close_charge_port,
-        SERVICE_SET_CHARGING_CURRENT: async_handle_set_charging_current,
-        SERVICE_SCHEDULE_CHARGING_AND_CLIMATE: async_handle_schedule_charging_and_climate,
-        SERVICE_START_HAZARD_LIGHTS: async_handle_start_hazard_lights,
-        SERVICE_START_HAZARD_LIGHTS_AND_HORN: async_handle_start_hazard_lights_and_horn,
-        SERVICE_START_VALET_MODE: async_handle_start_valet_mode,
-        SERVICE_STOP_VALET_MODE: async_handle_stop_valet_mode,
-        SERVICE_SET_WINDOWS: async_handle_set_windows,
-        SERVICE_SET_NAVIGATION: async_handle_set_navigation,
-        SERVICE_SET_OFF_PEAK_CHARGING: async_handle_set_off_peak_charging,
-        SERVICE_CAPTURE_SVM_IMAGE: async_handle_capture_svm_image,
-    }
-
+    """Register the existing public services with their validated schemas."""
     for service in SUPPORTED_SERVICES:
         hass.services.async_register(
-            DOMAIN, service, services[service], schema=SERVICE_SCHEMAS[service]
+            DOMAIN,
+            service,
+            partial(_async_handle_service, hass, service),
+            schema=SERVICE_SCHEMAS[service],
         )
     return True
 
