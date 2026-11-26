@@ -4,7 +4,13 @@ Japan-only Hyundai Bluelink integration for Home Assistant, maintained separatel
 from the multi-region project. The Japan API is included and released with the
 integration. No separate API package or local build is needed.
 
-This starts from the full working Japan build, including vehicle status, lock and
+<a href="https://github.com/phillip9933/HyundaiJP/releases/tag/v0.9.0"><img src="docs/badges/github-releases.svg" alt="Download Hyundai Bluelink JP 0.9.0 for Home Assistant from GitHub Releases" height="40"></a>
+
+**Support:** [Buy me a coffee](https://buymeacoffee.com/phillip9933) · [GitHub Sponsors](https://github.com/sponsors/phillip9933)
+
+## Features
+
+The integration provides vehicle status, lock and
 unlock, climate, charging controls and limits, charge port, supported windows,
 forced refresh, SVM images, command status watching and redacted diagnostics.
 Availability depends on the vehicle and its Bluelink subscription. Commands can
@@ -169,3 +175,7 @@ The exact starting commits are recorded in [ORIGINS.json](ORIGINS.json).
 Original MIT licenses are preserved in [LICENSE](LICENSE) and
 [LICENSE.api.txt](LICENSE.api.txt). This is an unofficial integration and is not
 affiliated with Hyundai.
+
+## AI usage
+
+I use AI tools for analysis, implementation, tests, and documentation. I decide what ships and take responsibility for maintaining it. Project-specific testing and known limitations are documented separately.
